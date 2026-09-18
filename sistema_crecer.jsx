@@ -268,7 +268,6 @@ const r2 = (n) => Math.round((n+Number.EPSILON)*100)/100;
 const todayStr = () => new Date().toISOString().slice(0,10);
 function addMonths(d,m){ const x=new Date(d+"T00:00:00"); x.setMonth(x.getMonth()+m); return x.toISOString().slice(0,10); }
 function addDays(d,n){ const x=new Date(d+"T00:00:00"); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); }
-function diffDias(f){ return Math.floor((new Date(todayStr()+"T00:00:00")-new Date(f+"T00:00:00"))/(864e5)); }
 function fmtDate(d){ if(!d)return"-"; const[y,m,dd]=d.split("-"); return`${dd}/${m}/${y}`; }
 function money(n){ return"$ "+Number(n||0).toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function getRegional(c){ return c.regionalOverride||(DEPARTAMENTOS.find(d=>d.nombre===c.departamento)?.regional||"Sin asignar"); }
@@ -367,56 +366,73 @@ function generarCronogramaMultiple(fechaOtorgamiento, destinosCredito) {
   return sorted;
 }
 
-// Calcula mora/punitorio sobre el SALDO REAL de una cuota (montoPagado actual)
-function calcMora(cuota, tasas) {
-  const saldo = r2((cuota.monto||0)-(cuota.montoPagado||0));
-  if(cuota.pagada||saldo<=0)return{diasMora:0,mora:0,punitorio:0,saldo:0};
-  const dias=diffDias(cuota.fechaVencimiento);
-  if(dias<=0)return{diasMora:0,mora:0,punitorio:0,saldo};
-  const moraBruta=r2(saldo*(tasas.mora/100)*(dias/365));
-  const dp=Math.max(0,dias-90);
-  const punitBruto=dp>0?r2(saldo*(tasas.punitorio/100)*(dp/365)):0;
-  // Neto = lo devengado menos lo ya abonado a mora/punitorio de esta cuota.
-  // Puede quedar en positivo (todavía se debe) o en negativo (saldo a favor
-  // del productor, si pagó de más en concepto de mora/punitorio).
-  const mora=r2(moraBruta-(cuota.moraPagada||0));
-  const punitorio=r2(punitBruto-(cuota.punitorioPagado||0));
-  return{diasMora:dias,mora,punitorio,saldo};
-}
+function diasEntre(desde,hasta){ return Math.floor((new Date(hasta+"T00:00:00")-new Date(desde+"T00:00:00"))/(864e5)); }
 
-// Calcula los intereses de mora HISTÓRICA para una cuota YA PAGADA (capital +
-// interés financiero saldados). Si el pago se hizo después del vencimiento,
-// calcula la mora/punitorio DEVENGADA A LA FECHA DE PAGO (no a hoy) y la
-// mantiene fija en el tiempo. Si además se cargó un pago de mora/punitorio
-// para esta cuota, se descuenta; el resultado puede ser positivo (todavía se
-// debe, se muestra en rojo) o negativo (saldo a favor, se muestra en azul).
-function calcMoraHistorica(cuota, tasas) {
-  if(!cuota || !cuota.pagada) return {diasMora:0,mora:0,punitorio:0,historica:false};
-  // Obtener la fecha del último pago registrado
-  const pagos = (cuota.pagos||[]).filter(p=>p.fecha);
-  if(!pagos.length) return {diasMora:0,mora:0,punitorio:0,historica:false};
-  const ultimoPago = pagos.reduce((max,p)=>p.fecha>max.fecha?p:max, pagos[0]);
-  const fechaPago = ultimoPago.fecha;
-  const fechaVenc = cuota.fechaVencimiento;
+// Devenga mora y punitorio de UNA cuota recorriendo su historial de pagos.
+//
+// El interés moratorio se devenga tramo por tramo sobre el saldo que estaba
+// impago DURANTE ESE TRAMO. Un pago posterior corta el devengamiento hacia
+// adelante, pero NO borra lo ya devengado antes: la mora de los 200 días en
+// que el productor debía $1.000.000 se calcula sobre $1.000.000, aunque hoy
+// deba $100.000. El punitorio corre igual pero sólo por los días del tramo
+// posteriores al día 90 desde el vencimiento.
+//
+// Los pagos imputados a mora/punitorio no amortizan capital: no mueven el
+// saldo ni la fecha de corte (si la movieran, pagar la mora generaría mora
+// nueva y la deuda no se cancelaría nunca).
+function calcMoraCuota(cuota, tasas) {
+  const vacio={diasMora:0,mora:0,punitorio:0,devMora:0,devPunit:0,moraPagada:0,punitorioPagado:0,saldo:0,pagada:false};
+  if(!cuota) return vacio;
+  const venc=cuota.fechaVencimiento;
   const moraPagada=cuota.moraPagada||0, punitorioPagado=cuota.punitorioPagado||0;
-  if(fechaPago <= fechaVenc){
-    // Se pagó en término: no se devengó mora/punitorio. Si igualmente se
-    // cargó algo como "pago a mora/punitorio" por error, queda como saldo
-    // a favor (negativo) en vez de perderse.
-    return {diasMora:0, mora:r2(0-moraPagada), punitorio:r2(0-punitorioPagado), historica:moraPagada>0||punitorioPagado>0, fechaPago};
+
+  // Amortizaciones ordenadas. Un pago anterior al vencimiento se toma como
+  // hecho en término (no devenga), por eso se ancla en la fecha de vencimiento.
+  const amort=(cuota.pagos||[])
+    .filter(p=>p.fecha&&p.tipo!=="mora"&&p.tipo!=="punitorio")
+    .map(p=>({fecha:p.fecha<venc?venc:p.fecha,monto:r2(p.monto||0)}))
+    .sort((a,b)=>a.fecha<b.fecha?-1:a.fecha>b.fecha?1:0);
+
+  // Registros viejos o importados pueden traer montoPagado sin historial de
+  // pagos. Ese importe sin fecha conocida se imputa al vencimiento (se asume
+  // pagado en término) para no inventar una mora que nunca se informó.
+  const sumAmort=r2(amort.reduce((s,p)=>s+p.monto,0));
+  const sinHistorial=r2((cuota.montoPagado||0)-sumAmort);
+  if(sinHistorial>0.01) amort.unshift({fecha:venc,monto:sinHistorial});
+
+  let saldo=r2(cuota.monto||0), devMora=0, devPunit=0, cursor=venc;
+
+  const tramo=(desde,hasta,saldoTramo)=>{
+    if(saldoTramo<=0)return;
+    const d0=Math.max(0,diasEntre(venc,desde)), d1=Math.max(0,diasEntre(venc,hasta));
+    if(d1<=d0)return;
+    devMora=r2(devMora+saldoTramo*(tasas.mora/100)*((d1-d0)/365));
+    const pIni=Math.max(d0,90);              // el punitorio arranca al día 90
+    if(d1>pIni) devPunit=r2(devPunit+saldoTramo*(tasas.punitorio/100)*((d1-pIni)/365));
+  };
+
+  for(const p of amort){
+    tramo(cursor,p.fecha,saldo);
+    if(p.fecha>cursor)cursor=p.fecha;
+    saldo=r2(saldo-p.monto);
+    if(saldo<=0){saldo=0;break;}
   }
-  // Hay mora histórica: se calcula UNA SOLA VEZ, a la fecha de pago, y queda fija.
-  const diasMora = Math.floor((new Date(fechaPago+"T00:00:00")-new Date(fechaVenc+"T00:00:00"))/(864e5));
-  const montoBase = cuota.monto||0;
-  const moraBruta = r2(montoBase*(tasas.mora/100)*(diasMora/365));
-  const dp = Math.max(0,diasMora-90);
-  const punitBruto = dp>0 ? r2(montoBase*(tasas.punitorio/100)*(dp/365)) : 0;
-  // Neto = devengado a la fecha de pago menos lo abonado (puede quedar negativo = saldo a favor)
-  const mora = r2(moraBruta-moraPagada);
-  const punitorio = r2(punitBruto-punitorioPagado);
-  return {
-    diasMora, mora, punitorio,
-    historica: true, fechaPago,
+  // Si todavía queda saldo impago, sigue devengando hasta hoy. Una cuota
+  // marcada como pagada congela el devengamiento en su último pago.
+  const abierta=saldo>0&&!cuota.pagada;
+  if(abierta) tramo(cursor,todayStr(),saldo);
+
+  const corte=abierta?todayStr():cursor;
+  return{
+    diasMora:Math.max(0,diasEntre(venc,corte)),
+    // Neto todavía adeudado. Puede quedar negativo (saldo a favor del
+    // productor) si se imputó a mora/punitorio más de lo devengado.
+    mora:r2(devMora-moraPagada),
+    punitorio:r2(devPunit-punitorioPagado),
+    devMora:r2(devMora), devPunit:r2(devPunit),
+    moraPagada, punitorioPagado,
+    saldo:r2(Math.max(0,saldo)),
+    pagada:!!cuota.pagada||saldo<=0,
   };
 }
 
@@ -428,9 +444,8 @@ function calcularFilas(credito, tasas) {
   return meses.map(mes => {
     const cap=caps.find(c=>c.mes===mes)||null;
     const int=ints.find(c=>c.mes===mes)||null;
-    // Para cuotas pagadas: calcular mora histórica; para pendientes: mora actual
-    const moraCap = cap ? (cap.pagada ? calcMoraHistorica(cap,tasas) : calcMora(cap,tasas)) : null;
-    const moraInt = int ? (int.pagada ? calcMoraHistorica(int,tasas) : calcMora(int,tasas)) : null;
+    const moraCap = cap ? calcMoraCuota(cap,tasas) : null;
+    const moraInt = int ? calcMoraCuota(int,tasas) : null;
     return{
       mes, fechaVencimiento:(cap||int).fechaVencimiento,
       cap, int, nCaps:caps.length, nInts:ints.length,
@@ -441,18 +456,32 @@ function calcularFilas(credito, tasas) {
 
 // Totales resumidos de un crédito (capital, interés, mora, cobrado, deuda total)
 function calcularTotalesCredito(credito, linea) {
-  const tasas = getTasas(linea);
-  const filas = calcularFilas(credito, tasas);
-  let cap=0,int=0,mora=0,punit=0,abonado=0,pendCap=0,pendInt=0;
+  return totalizarFilas(calcularFilas(credito, getTasas(linea)));
+}
+
+// Totaliza un cronograma ya calculado. Separa lo DEVENGADO de mora/punitorio
+// de lo efectivamente COBRADO por esos conceptos: el total cobrado tiene que
+// incluir lo que el productor pagó de mora y punitorio, no sólo el valor de
+// las cuotas.
+function totalizarFilas(filas) {
+  let cap=0,int=0,mora=0,punit=0,devMora=0,devPunit=0,
+      abonadoCuotas=0,moraCobrada=0,punitCobrado=0,pendCap=0,pendInt=0;
   filas.forEach(f=>{
     cap+=(f.cap?.monto||0); int+=(f.int?.monto||0);
     mora+=(f.moraCap?.mora||0)+(f.moraInt?.mora||0);
     punit+=(f.moraCap?.punitorio||0)+(f.moraInt?.punitorio||0);
-    abonado+=(f.cap?.montoPagado||0)+(f.int?.montoPagado||0);
+    devMora+=(f.moraCap?.devMora||0)+(f.moraInt?.devMora||0);
+    devPunit+=(f.moraCap?.devPunit||0)+(f.moraInt?.devPunit||0);
+    moraCobrada+=(f.moraCap?.moraPagada||0)+(f.moraInt?.moraPagada||0);
+    punitCobrado+=(f.moraCap?.punitorioPagado||0)+(f.moraInt?.punitorioPagado||0);
+    abonadoCuotas+=(f.cap?.montoPagado||0)+(f.int?.montoPagado||0);
     if(f.cap&&!f.cap.pagada)pendCap+=r2(f.cap.monto-(f.cap.montoPagado||0));
     if(f.int&&!f.int.pagada)pendInt+=r2(f.int.monto-(f.int.montoPagado||0));
   });
-  return{cap:r2(cap),int:r2(int),mora:r2(mora),punit:r2(punit),abonado:r2(abonado),
+  return{cap:r2(cap),int:r2(int),mora:r2(mora),punit:r2(punit),
+    devMora:r2(devMora),devPunit:r2(devPunit),
+    abonadoCuotas:r2(abonadoCuotas),moraCobrada:r2(moraCobrada),punitCobrado:r2(punitCobrado),
+    abonado:r2(abonadoCuotas+moraCobrada+punitCobrado),
     pendCap:r2(pendCap),pendInt:r2(pendInt),totalAdeudado:r2(pendCap+pendInt+mora+punit)};
 }
 
@@ -947,19 +976,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
   const vencRend=addDays(credito.fechaOtorgamiento,90);
 
   // Totales
-  const tots=useMemo(()=>{
-    let cap=0,int=0,mora=0,punit=0,abonado=0,pendCap=0,pendInt=0;
-    filas.forEach(f=>{
-      cap+=(f.cap?.monto||0); int+=(f.int?.monto||0);
-      mora+=(f.moraCap?.mora||0)+(f.moraInt?.mora||0);
-      punit+=(f.moraCap?.punitorio||0)+(f.moraInt?.punitorio||0);
-      abonado+=(f.cap?.montoPagado||0)+(f.int?.montoPagado||0);
-      if(f.cap&&!f.cap.pagada)pendCap+=r2(f.cap.monto-(f.cap.montoPagado||0));
-      if(f.int&&!f.int.pagada)pendInt+=r2(f.int.monto-(f.int.montoPagado||0));
-    });
-    return{cap:r2(cap),int:r2(int),mora:r2(mora),punit:r2(punit),abonado:r2(abonado),
-      pendCap:r2(pendCap),pendInt:r2(pendInt),totalAdeudado:r2(pendCap+pendInt+mora+punit)};
-  },[filas]);
+  const tots=useMemo(()=>totalizarFilas(filas),[filas]);
 
   // Monto de garantía = capital + interés financiero programado (sin mora/punitorio)
   const montoGarantia=r2(tots.cap+tots.int);
@@ -1000,10 +1017,20 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
     setPagoForm({mes:f.mes,montoCapital:cs,montoInteres:is,montoMora:0,montoPunitorio:0,moraPendiente,punitPendiente,fecha:todayStr(),folio:""});
   }
   function confirmarPago(){
-    // 1. Aplicar los pagos de capital e interés ingresados
+    // 1. Aplicar los pagos de capital e interés, TOPEADOS al saldo de cada
+    // cuota. Es habitual que el productor deposite más que el valor de la
+    // cuota porque el importe ya incluye los intereses moratorios y
+    // punitorios. Ese excedente no es capital: se separa acá y más abajo se
+    // imputa a mora y punitorio, en vez de inflar montoPagado (que además
+    // hacía desaparecer la mora al dejar el saldo en cero).
+    let excedente=0;
     let cuotas=credito.cuotas.map(c=>{
       if(c.mes!==pagoForm.mes)return c;
-      const pago=c.tipo==="capital"?r2(Number(pagoForm.montoCapital)):r2(Number(pagoForm.montoInteres));
+      const ingresado=c.tipo==="capital"?r2(Number(pagoForm.montoCapital)||0):r2(Number(pagoForm.montoInteres)||0);
+      if(ingresado<=0)return c;
+      const saldo=Math.max(0,r2(c.monto-(c.montoPagado||0)));
+      const pago=Math.min(ingresado,saldo);
+      excedente=r2(excedente+(ingresado-pago));
       if(pago<=0)return c;
       const nmp=r2((c.montoPagado||0)+pago);
       return{...c,montoPagado:nmp,pagada:nmp>=c.monto-0.01,
@@ -1017,32 +1044,49 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
     // acumulada de las cuotas 1 a 7). Por eso el monto ingresado se reparte
     // entre TODAS las cuotas del crédito con mora/punitorio pendiente,
     // empezando por la más antigua (orden cronológico), hasta agotarlo.
+    // Devuelve las cuotas ajustadas y el sobrante que no encontró deuda donde
+    // imputarse, para poder encadenar mora -> punitorio.
     function aplicarAMoraPunitorio(cuotasArr, campo, montoIngresado, tasas){
       let restante=r2(Number(montoIngresado)||0);
-      if(restante<=0)return cuotasArr;
+      if(restante<=0)return{cuotas:cuotasArr,restante:0};
       const ordenCronologico=[...cuotasArr].sort((a,b)=>a.mes-b.mes||(a.tipo>b.tipo?1:-1));
       const campoPagado=campo==="mora"?"moraPagada":"punitorioPagado";
       const tipoPago=campo==="mora"?"mora":"punitorio";
-      const ajustes={}; // id de cuota -> {incremento, pago}
+      const ajustes={}; // id de cuota -> importe a imputar
       for(const c of ordenCronologico){
         if(restante<=0)break;
-        const calc=c.pagada?calcMoraHistorica(c,tasas):calcMora(c,tasas);
-        const pendiente=calc[campo]||0;
+        const pendiente=calcMoraCuota(c,tasas)[campo]||0;
         if(pendiente<=0)continue;
         const aplicar=Math.min(restante,pendiente);
         restante=r2(restante-aplicar);
         ajustes[c.id]=aplicar;
       }
-      return cuotasArr.map(c=>{
+      return{restante,cuotas:cuotasArr.map(c=>{
         if(!ajustes[c.id])return c;
         const aplicar=ajustes[c.id];
         return{...c,[campoPagado]:r2((c[campoPagado]||0)+aplicar),
           pagos:[...(c.pagos||[]),{fecha:pagoForm.fecha,monto:aplicar,folio:pagoForm.folio,tipo:tipoPago,mesOrigen:c.mes}]};
-      });
+      })};
     }
     const tasas=getTasas(linea);
-    cuotas=aplicarAMoraPunitorio(cuotas,"mora",pagoForm.montoMora,tasas);
-    cuotas=aplicarAMoraPunitorio(cuotas,"punitorio",pagoForm.montoPunitorio,tasas);
+    let res=aplicarAMoraPunitorio(cuotas,"mora",pagoForm.montoMora,tasas); cuotas=res.cuotas;
+    res=aplicarAMoraPunitorio(cuotas,"punitorio",pagoForm.montoPunitorio,tasas); cuotas=res.cuotas;
+
+    // 1c. El excedente pagado por encima del valor de las cuotas se imputa a
+    // la mora y luego al punitorio pendientes, de la cuota más antigua a la
+    // más nueva. Lo que sobre después de cancelar todo queda como saldo a
+    // favor sobre el capital del mes cobrado.
+    if(excedente>0){
+      res=aplicarAMoraPunitorio(cuotas,"mora",excedente,tasas); cuotas=res.cuotas;
+      res=aplicarAMoraPunitorio(cuotas,"punitorio",res.restante,tasas); cuotas=res.cuotas;
+      const aFavor=res.restante;
+      if(aFavor>0.01){
+        cuotas=cuotas.map(c=>c.mes===pagoForm.mes&&c.tipo==="capital"
+          ?{...c,montoPagado:r2((c.montoPagado||0)+aFavor),
+            pagos:[...(c.pagos||[]),{fecha:pagoForm.fecha,monto:aFavor,folio:pagoForm.folio,tipo:"capital"}]}
+          :c);
+      }
+    }
 
     // 2. Carry-forward: si la cuota de interés del mes quedó con saldo (pago parcial),
     //    sumar ese saldo a la ÚLTIMA cuota de interés pendiente futura.
@@ -1078,10 +1122,9 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
     setPagoForm(null);
   }
   function startEdit(f){setEditFila({mes:f.mes,capM:f.cap?.monto??"",capF:f.cap?.fechaVencimiento??"",intM:f.int?.monto??"",intF:f.int?.fechaVencimiento??""});}
-  // Editar la fecha de un pago YA registrado. Como calcMoraHistorica siempre
-  // recalcula la mora histórica a partir de la fecha del pago en cada render,
-  // simplemente actualizando este campo alcanza para que la mora/interés se
-  // recalculen automáticamente en toda la planilla.
+  // Editar la fecha de un pago YA registrado. Como calcMoraCuota recorre el
+  // historial de pagos en cada render, actualizar este campo alcanza para que
+  // la mora se recalcule automáticamente en toda la planilla.
   function startEditPago(mes,tipo,idx,pago){
     setEditPago({mes,tipo,idx,fecha:pago.fecha,monto:pago.monto,folio:pago.folio||""});
   }
@@ -1253,8 +1296,9 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       {/* Cronograma */}
       <div style={{fontWeight:700,color:"#23362B",fontSize:13.5,marginBottom:6}}>Cronograma de cuotas e intereses</div>
       <div style={{fontSize:11.5,color:"#9A9482",marginBottom:4}}>Los montos de capital e interés financiero son FIJOS según el cronograma original. Mora y punitorios se calculan sobre el saldo real impago.</div>
-      {(tots.mora>0||tots.punit>0)&&<div style={{fontSize:11.5,color:"var(--color-danger)",marginBottom:4}}>
-        Mora acumulada: {money(tots.mora)} · Punitorio acumulado (desde día 90): {money(tots.punit)}
+      {(tots.devMora>0||tots.devPunit>0)&&<div style={{fontSize:11.5,marginBottom:4}}>
+        <span style={{color:"#8A8470"}}>Mora devengada: {money(tots.devMora)} · Punitorio devengado (desde día 90): {money(tots.devPunit)} · Cobrado: {money(r2(tots.moraCobrada+tots.punitCobrado))}</span>
+        {(tots.mora>0||tots.punit>0)&&<span style={{color:"var(--color-danger)",fontWeight:700}}> · Pendiente: {money(r2(tots.mora+tots.punit))}</span>}
       </div>}
       <div style={{fontSize:12.5,fontWeight:700,color:"#23362B",marginBottom:10}}>Deuda total actual: {money(tots.totalAdeudado)}</div>
 
@@ -1279,7 +1323,11 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
               const mora=r2((f.moraCap?.mora||0)+(f.moraInt?.mora||0));
               const punit=r2((f.moraCap?.punitorio||0)+(f.moraInt?.punitorio||0));
               const totalPagar=r2(capS+intS+mora+punit);
-              const abonado=r2((f.cap?.montoPagado||0)+(f.int?.montoPagado||0));
+              // Lo abonado incluye lo cobrado por mora y punitorio, no sólo el
+              // valor de las cuotas.
+              const abonado=r2((f.cap?.montoPagado||0)+(f.int?.montoPagado||0)
+                +(f.moraCap?.moraPagada||0)+(f.moraInt?.moraPagada||0)
+                +(f.moraCap?.punitorioPagado||0)+(f.moraInt?.punitorioPagado||0));
               const capLabel=f.cap?`Cap ${f.cap.numero}/${f.nCaps}`:"";
               const intLabel=f.int?`Int ${f.int.numero}/${f.nInts}`:"";
               const nCuota=[capLabel,intLabel].filter(Boolean).join(" · ");
@@ -1346,6 +1394,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
                     <div style={{display:"flex",gap:6,paddingBottom:12}}><Boton size="sm" icon={Save} onClick={confirmarPago}>Confirmar</Boton><Boton size="sm" variant="ghost" onClick={()=>setPagoForm(null)}>Cancelar</Boton></div>
                   </div>
                   {(Number(pagoForm.montoMora)>0||Number(pagoForm.montoPunitorio)>0)&&<div style={{fontSize:11,color:"#8A5C00",marginTop:2}}>⚠️ Si el productor no pagó la mora/punitorio, dejá esos campos en 0 — de lo contrario el sistema los va a dar por cancelados.</div>}
+                  <div style={{fontSize:11,color:"#5B6B63",marginTop:2}}>Si cargás en capital o interés un importe mayor al saldo de la cuota, el excedente se imputa automáticamente a la mora y después al punitorio pendiente, de la cuota más antigua a la más nueva.</div>
                 </td></tr>}
                 {editFila&&editFila.mes===f.mes&&<tr><td colSpan={isAdmin?11:10} style={{padding:"10px",background:"#FBF1EE"}}>
                   <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
@@ -1364,7 +1413,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
               <td style={{...TD,fontFamily:"monospace"}}>{money(tots.int)}</td>
               <td style={{...TD,borderLeft:"1px solid #DDD",fontFamily:"monospace",color:tots.mora>0?"var(--color-danger)":"inherit"}}>{money(tots.mora)}</td>
               <td style={{...TD,fontFamily:"monospace",color:tots.punit>0?"var(--color-danger)":"inherit"}}>{money(tots.punit)}</td>
-              <td style={{...TD,borderLeft:"1px solid #DDD",fontFamily:"monospace"}}>{money(r2(tots.cap+tots.int+tots.mora+tots.punit))}</td>
+              <td style={{...TD,borderLeft:"1px solid #DDD",fontFamily:"monospace"}}>{money(tots.totalAdeudado)}</td>
               <td style={{...TD,fontFamily:"monospace",color:"var(--color-success)"}}>{money(tots.abonado)}</td>
               <td style={TD}></td>
               {isAdmin&&<td style={TD}></td>}
@@ -1374,11 +1423,16 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       </div>
 
       {/* Resumen de deuda */}
-      <div style={{marginTop:12,background:tots.totalAdeudado>0?"#FFF3F0":"#F4F9F4",border:`1px solid ${tots.totalAdeudado>0?"var(--color-danger)":"var(--color-success)"}`,borderRadius:8,padding:"10px 14px",display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,fontSize:12}}>
+      <div style={{marginTop:12,background:tots.totalAdeudado>0?"#FFF3F0":"#F4F9F4",border:`1px solid ${tots.totalAdeudado>0?"var(--color-danger)":"var(--color-success)"}`,borderRadius:8,padding:"10px 14px",display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8,fontSize:12}}>
         <div><div style={{color:"#8A8470",fontSize:10}}>Capital pendiente</div><div style={{fontFamily:"monospace",fontWeight:700}}>{money(tots.pendCap)}</div></div>
         <div><div style={{color:"#8A8470",fontSize:10}}>Interés fin. pendiente</div><div style={{fontFamily:"monospace",fontWeight:700}}>{money(tots.pendInt)}</div></div>
-        <div><div style={{color:"#8A8470",fontSize:10}}>Mora + Punitorios</div><div style={{fontFamily:"monospace",fontWeight:700,color:tots.mora+tots.punit>0?"var(--color-danger)":"inherit"}}>{money(r2(tots.mora+tots.punit))}</div></div>
-        <div><div style={{color:"#8A8470",fontSize:10}}>TOTAL COBRADO</div><div style={{fontFamily:"monospace",fontWeight:700,color:"var(--color-success)"}}>{money(tots.abonado)}</div></div>
+        <div><div style={{color:"#8A8470",fontSize:10}}>Mora + Punit. pendiente</div><div style={{fontFamily:"monospace",fontWeight:700,color:tots.mora+tots.punit>0?"var(--color-danger)":"inherit"}}>{money(r2(tots.mora+tots.punit))}</div></div>
+        <div><div style={{color:"#8A8470",fontSize:10}}>Mora + Punit. cobrado</div><div style={{fontFamily:"monospace",fontWeight:700,color:"var(--color-success)"}}>{money(r2(tots.moraCobrada+tots.punitCobrado))}</div></div>
+        <div>
+          <div style={{color:"#8A8470",fontSize:10}}>TOTAL COBRADO</div>
+          <div style={{fontFamily:"monospace",fontWeight:700,color:"var(--color-success)"}}>{money(tots.abonado)}</div>
+          <div style={{color:"#8A8470",fontSize:9.5}}>Cuotas {money(tots.abonadoCuotas)} + mora/punit. {money(r2(tots.moraCobrada+tots.punitCobrado))}</div>
+        </div>
         <div><div style={{color:"#8A8470",fontSize:10}}>TOTAL ADEUDADO</div><div style={{fontFamily:"monospace",fontWeight:700,fontSize:15,color:tots.totalAdeudado>0?"var(--color-danger)":"var(--color-success)"}}>{money(tots.totalAdeudado)}</div></div>
       </div>
 
