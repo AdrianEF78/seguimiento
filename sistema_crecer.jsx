@@ -1004,6 +1004,14 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
     const next=obsList.filter(o=>o.id!==id);
     setObsList(next); onUpdate({...credito,observaciones:next});
   }
+  // null | {soloLectura, enfocar}
+  const[selectorParcela,setSelectorParcela]=useState(null);
+  const parcelas=credito.parcelas||[];
+  function asignarParcela(ficha){
+    if(!parcelas.some(p=>p.id===ficha.id))onUpdate({...credito,parcelas:[...parcelas,ficha]});
+    setSelectorParcela(null);
+  }
+  function quitarParcela(id){onUpdate({...credito,parcelas:parcelas.filter(p=>p.id!==id)});}
   function startPago(f){
     const cs=f.cap&&!f.cap.pagada?r2(f.cap.monto-(f.cap.montoPagado||0)):0;
     const is=f.int&&!f.int.pagada?r2(f.int.monto-(f.int.montoPagado||0)):0;
@@ -1210,6 +1218,28 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
           <InfoRow label="Representante legal – Teléfono" value={credito.repLegal.telefono}/>
         </>}
       </div>
+
+      {/* Ubicación catastral */}
+      <div style={{border:"1px solid #E4DFCF",borderRadius:8,padding:"10px 14px",marginBottom:14,background:"#fff"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:parcelas.length?8:0,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,fontWeight:700,fontSize:13,color:"#23362B"}}><MapPin size={14} color="var(--color-primary)"/>Ubicación catastral</div>
+          {isAdmin&&<span className="no-imprimir"><Boton size="sm" variant="outline" icon={MapPin} onClick={()=>setSelectorParcela({soloLectura:false})}>{parcelas.length?"Agregar otra parcela":"Ubicar en parcela catastral"}</Boton></span>}
+        </div>
+        {parcelas.length===0
+          ?<div style={{fontSize:12,color:"#9A9482",marginTop:4}}>Sin parcela asignada. {isAdmin?"Ubicá al productor en su parcela para que aparezca en el mapa.":""}</div>
+          :parcelas.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,borderTop:"1px solid #F0ECDD",padding:"6px 0",fontSize:12.5}}>
+            <div style={{minWidth:0}}>
+              <div style={{color:"#23362B"}}>{describirParcela(p)}</div>
+              <div style={{fontSize:10.5,color:"#9A9482"}}>Lat {p.lat} · Lon {p.lon}{p.asignada?` · asignada el ${fmtDate(p.asignada)}`:""}</div>
+            </div>
+            <div className="no-imprimir" style={{display:"flex",gap:4,flexShrink:0}}>
+              <button title="Ver en el mapa" onClick={()=>setSelectorParcela({soloLectura:true,enfocar:p})} style={iBtn}><Eye size={13}/></button>
+              {isAdmin&&<button title="Quitar parcela" onClick={()=>quitarParcela(p.id)} style={{...iBtn,color:"var(--color-danger)"}}><Trash2 size={13}/></button>}
+            </div>
+          </div>)}
+      </div>
+      {selectorParcela&&<SelectorParcelaModal credito={credito} enfocar={selectorParcela.enfocar}
+        soloLectura={selectorParcela.soloLectura} onAsignar={asignarParcela} onClose={()=>setSelectorParcela(null)}/>}
 
       {/* Monto de garantía */}
       <div style={{background:"#EAF3EC",border:"1px solid #2F5233",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -2389,7 +2419,351 @@ const CHUBUT_CIUDADES = [
 ];
 const CHUBUT_MAP_VIEWBOX_BASE = {x:0,y:0,w:640,h:440};
 
-function MapaChubutRegional({datos,tots,tema}){
+// ─── Parcelario catastral ─────────────────────────────────────────────────────
+// Proyección equirectangular del mapa SVG (lon/lat → unidades del viewBox),
+// ajustada sobre los límites departamentales: error menor a 0,3 unidades
+// (~250 m). mapas/generar_parcelario.mjs usa los mismos coeficientes.
+const CHUBUT_PROY={ax:71.108998,bx:5147.2825,ay:-98.849024,by:-4137.6114};
+function geoASvg(lon,lat){return[CHUBUT_PROY.ax*lon+CHUBUT_PROY.bx,CHUBUT_PROY.ay*lat+CHUBUT_PROY.by];}
+function svgAGeo(x,y){return[(x-CHUBUT_PROY.bx)/CHUBUT_PROY.ax,(y-CHUBUT_PROY.by)/CHUBUT_PROY.ay];}
+
+// Archivo generado con mapas/generar_parcelario.mjs. Se sirve como estático
+// (en Vite/Next/CRA va en public/mapas/) y se descarga recién cuando alguien
+// activa la capa de parcelas o abre el selector, para no cargar ~1 MB al inicio.
+const PARCELARIO_URL="/mapas/parcelario_chubut.min.json";
+
+// Códigos INDEC de departamento que trae el parcelario.
+const DEPTO_CODIGO={"007":"Biedma","014":"Cushamen","021":"Escalante","028":"Florentino Ameghino","035":"Futaleufú","042":"Gaiman","049":"Gastre","056":"Languiñeo","063":"Mártires","070":"Paso de Indios","077":"Rawson","084":"Río Senguer","091":"Sarmiento","098":"Tehuelches","105":"Telsen"};
+const DEPTO_COD_POR_NOMBRE=Object.fromEntries(Object.entries(DEPTO_CODIGO).map(([c,n])=>[n,c]));
+
+let parcelarioPromesa=null;
+function cargarParcelario(){
+  if(!parcelarioPromesa){
+    parcelarioPromesa=fetch(PARCELARIO_URL)
+      .then(r=>{if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json();})
+      .then(decodificarParcelario)
+      .catch(e=>{parcelarioPromesa=null;throw e;});
+  }
+  return parcelarioPromesa;
+}
+
+function decodificarParcelario(json){
+  const q=json.q||100;
+  const lista=json.p.map(([cx,cy,depto,ha,renspa,nombre,chacra,anillos])=>{
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    const rs=anillos.map(r=>{
+      const pts=new Float32Array(r.length);
+      let x=0,y=0;
+      for(let i=0;i<r.length;i+=2){
+        x+=r[i];y+=r[i+1];
+        const fx=x/q,fy=y/q;pts[i]=fx;pts[i+1]=fy;
+        if(fx<x0)x0=fx;if(fx>x1)x1=fx;if(fy<y0)y0=fy;if(fy>y1)y1=fy;
+      }
+      return pts;
+    });
+    return{id:`${depto}-${cx}-${cy}`,cx:cx/q,cy:cy/q,depto,ha,
+      renspa:renspa||"",nombre:nombre||"",chacra:chacra||"",anillos:rs,bb:[x0,y0,x1,y1],
+      txt:normalizarTxt(`${renspa||""} ${nombre||""} ${chacra||""}`)};
+  });
+  return{lista,porId:new Map(lista.map(p=>[p.id,p]))};
+}
+
+function useParcelario(activo){
+  const[st,setSt]=useState({estado:"inactivo",datos:null,error:null});
+  useEffect(()=>{
+    if(!activo||st.datos)return;
+    let vivo=true;
+    setSt(s=>({...s,estado:"cargando",error:null}));
+    cargarParcelario()
+      .then(datos=>{if(vivo)setSt({estado:"listo",datos,error:null});})
+      .catch(e=>{if(vivo)setSt({estado:"error",datos:null,error:e.message});});
+    return()=>{vivo=false;};
+  },[activo]); // eslint-disable-line react-hooks/exhaustive-deps
+  return st;
+}
+
+function pathParcela(p){
+  if(!p._d)p._d=p.anillos.map(r=>{
+    let s="M"+r[0].toFixed(2)+","+r[1].toFixed(2);
+    for(let i=2;i<r.length;i+=2)s+="L"+r[i].toFixed(2)+","+r[i+1].toFixed(2);
+    return s+"Z";
+  }).join("");
+  return p._d;
+}
+
+function normalizarTxt(s){return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase();}
+
+// En el parcelario de origen las vocales acentuadas y la Ñ llegaron como "?"
+// ("SAN JOS?", "LA CA?ADA"); ese "?" coincide con cualquier letra buscada.
+function contieneTxt(txt,q){
+  for(let i=0;i+q.length<=txt.length;i++){
+    let ok=true;
+    for(let j=0;j<q.length;j++){const c=txt[i+j];if(c!==q[j]&&c!=="?"){ok=false;break;}}
+    if(ok)return true;
+  }
+  return false;
+}
+
+// Primero las parcelas cuya chacra o RENSPA coincide exacto con lo buscado
+// (buscar "204" trae la chacra 204 antes que un RENSPA que contiene "204").
+function buscarParcelas(datos,consulta,deptoCod,max=40){
+  const tokens=normalizarTxt(consulta).split(/\s+/).filter(Boolean);
+  if(!tokens.length)return[];
+  const out=[];
+  for(const p of datos.lista){
+    if(deptoCod&&p.depto!==deptoCod)continue;
+    if(!tokens.every(t=>contieneTxt(p.txt,t)))continue;
+    const exacto=tokens.some(t=>normalizarTxt(p.chacra)===t||normalizarTxt(p.renspa)===t);
+    out.push({p,orden:exacto?0:1});
+    if(out.length>=max*10)break;
+  }
+  return out.sort((a,b)=>a.orden-b.orden).slice(0,max).map(x=>x.p);
+}
+
+// Lo que se guarda en el crédito. Lleva lat/lon propios para que el marcador
+// del productor siga en su lugar aunque se regenere o no cargue el parcelario.
+function fichaParcela(p){
+  const[lon,lat]=svgAGeo(p.cx,p.cy);
+  return{id:p.id,depto:p.depto,deptoNombre:DEPTO_CODIGO[p.depto]||p.depto,ha:p.ha,
+    renspa:p.renspa,nombre:p.nombre,chacra:p.chacra,
+    lat:Math.round(lat*1e5)/1e5,lon:Math.round(lon*1e5)/1e5,asignada:todayStr()};
+}
+function fmtHa(h){const n=Number(h||0);return n.toLocaleString("es-AR",{maximumFractionDigits:n<10?2:n<1000?1:0});}
+function describirParcela(f){
+  return[f.deptoNombre||DEPTO_CODIGO[f.depto],f.chacra&&`Chacra ${f.chacra}`,f.nombre,f.renspa&&`RENSPA ${f.renspa}`,f.ha!=null&&`${fmtHa(f.ha)} ha`].filter(Boolean).join(" · ");
+}
+
+const bboxDeptoCache={};
+function bboxDepto(nombre){
+  if(!(nombre in bboxDeptoCache)){
+    const d=CHUBUT_DEPTOS_SVG.find(x=>x.nombre===nombre);
+    const n=d?[...d.d.matchAll(/(-?\d+\.?\d*),(-?\d+\.?\d*)/g)].map(m=>[+m[1],+m[2]]):[];
+    bboxDeptoCache[nombre]=n.length?[Math.min(...n.map(p=>p[0])),Math.min(...n.map(p=>p[1])),Math.max(...n.map(p=>p[0])),Math.max(...n.map(p=>p[1]))]:null;
+  }
+  return bboxDeptoCache[nombre];
+}
+
+// Parcelas que caen en la vista. Con demasiadas en pantalla el SVG se vuelve
+// lento y no se distinguen: en ese caso se pide acercar el mapa.
+function parcelasEnVista(datos,vb,max){
+  const out=[],minLado=vb.w/1500;
+  for(const p of datos.lista){
+    const b=p.bb;
+    if(b[2]<vb.x||b[0]>vb.x+vb.w||b[3]<vb.y||b[1]>vb.y+vb.h)continue;
+    if(b[2]-b[0]<minLado&&b[3]-b[1]<minLado)continue;
+    out.push(p);
+    if(out.length>max)return{lista:[],excede:true};
+  }
+  return{lista:out,excede:false};
+}
+
+// Zoom y arrastre del mapa. El ancho mínimo de la vista (~1,4 km) permite
+// llegar a las chacras más chicas del valle.
+const MAPA_ANCHO_MIN=0.002;
+function useVistaMapa(base=CHUBUT_MAP_VIEWBOX_BASE){
+  const svgRef=React.useRef(null);
+  const movioRef=React.useRef(false);
+  const soltarRef=React.useRef(null);
+  const[vb,setVbRaw]=useState({...base});
+  const vbRef=React.useRef(vb); vbRef.current=vb;
+  const[arrastrando,setArrastrando]=useState(false);
+
+  const setVb=useCallback(next=>setVbRaw(cur=>{
+    const n=typeof next==="function"?next(cur):next;
+    const w=Math.max(base.w*MAPA_ANCHO_MIN,Math.min(base.w*1.4,n.w));
+    const h=w*(base.h/base.w);
+    const cx=n.x+n.w/2,cy=n.y+n.h/2;
+    const x=Math.max(base.x-base.w*0.2,Math.min(base.x+base.w*1.2-w,cx-w/2));
+    const y=Math.max(base.y-base.h*0.2,Math.min(base.y+base.h*1.2-h,cy-h/2));
+    return{x,y,w,h};
+  }),[base]);
+
+  const zoomBy=f=>setVb(cur=>({x:cur.x+(cur.w-cur.w*f)/2,y:cur.y+(cur.h-cur.h*f)/2,w:cur.w*f,h:cur.h*f}));
+  const irA=useCallback((bb,margen=0.15)=>{
+    const[x0,y0,x1,y1]=bb;
+    let w=Math.max(x1-x0,1e-4)*(1+2*margen),h=Math.max(y1-y0,1e-4)*(1+2*margen);
+    const ar=base.h/base.w;
+    if(h/w>ar)w=h/ar;else h=w*ar;
+    setVb({x:(x0+x1)/2-w/2,y:(y0+y1)/2-h/2,w,h});
+  },[base,setVb]);
+
+  // La rueda se escucha en forma nativa y no pasiva: el onWheel de React es
+  // pasivo y no puede evitar que la página se desplace mientras se hace zoom.
+  useEffect(()=>{
+    const svg=svgRef.current;if(!svg)return;
+    const onWheel=e=>{
+      e.preventDefault();
+      const f=e.deltaY>0?1.15:1/1.15,rect=svg.getBoundingClientRect();
+      const px=(e.clientX-rect.left)/rect.width,py=(e.clientY-rect.top)/rect.height;
+      setVb(cur=>{const nw=cur.w*f,nh=cur.h*f;return{x:cur.x+(cur.w-nw)*px,y:cur.y+(cur.h-nh)*py,w:nw,h:nh};});
+    };
+    svg.addEventListener("wheel",onWheel,{passive:false});
+    return()=>svg.removeEventListener("wheel",onWheel);
+  },[setVb]);
+  useEffect(()=>()=>soltarRef.current&&soltarRef.current(),[]);
+
+  function onPointerDown(e){
+    if(e.button>0)return;
+    const svg=svgRef.current;if(!svg)return;
+    const d={x:e.clientX,y:e.clientY,rect:svg.getBoundingClientRect(),vb0:vbRef.current};
+    movioRef.current=false;
+    const mover=ev=>{
+      const dx=ev.clientX-d.x,dy=ev.clientY-d.y;
+      if(!movioRef.current){if(Math.hypot(dx,dy)<4)return;movioRef.current=true;setArrastrando(true);}
+      setVb({...d.vb0,x:d.vb0.x-dx/d.rect.width*d.vb0.w,y:d.vb0.y-dy/d.rect.height*d.vb0.h});
+    };
+    const soltar=()=>{
+      window.removeEventListener("pointermove",mover);
+      window.removeEventListener("pointerup",soltar);
+      window.removeEventListener("pointercancel",soltar);
+      soltarRef.current=null;setArrastrando(false);
+    };
+    window.addEventListener("pointermove",mover);
+    window.addEventListener("pointerup",soltar);
+    window.addEventListener("pointercancel",soltar);
+    soltarRef.current=soltar;
+  }
+
+  return{svgRef,vb,k:vb.w/base.w,setVb,zoomBy,irA,reset:()=>setVb({...base}),onPointerDown,arrastrando,
+    // Un clic al terminar de arrastrar el mapa no debe seleccionar nada.
+    fueArrastre:()=>movioRef.current,
+    vbStr:`${vb.x.toFixed(3)} ${vb.y.toFixed(3)} ${vb.w.toFixed(3)} ${vb.h.toFixed(3)}`};
+}
+
+function ControlesZoom({vista}){
+  const b={width:26,height:26,borderRadius:6,border:"1px solid #9BBAD4",background:"#fff",cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1,color:"#1A2B4A"};
+  return <div className="no-imprimir" style={{position:"absolute",top:8,right:8,zIndex:5,display:"flex",flexDirection:"column",gap:4}}>
+    <button onClick={()=>vista.zoomBy(0.75)} title="Acercar" style={b}>+</button>
+    <button onClick={()=>vista.zoomBy(1/0.75)} title="Alejar" style={b}>–</button>
+    <button onClick={vista.reset} title="Restablecer vista" style={{...b,fontSize:11,fontWeight:400}}>⟲</button>
+  </div>;
+}
+
+const ORDEN_GRAVEDAD={MORA:3,AL_DIA:2,SIN_CRONOGRAMA:1,CANCELADO:0};
+function coloresEstado(tema){
+  return{MORA:tema?.danger||"#B3261E",AL_DIA:tema?.success||"#2E7D32",CANCELADO:tema?.neutral||"#6B7280",SIN_CRONOGRAMA:"#9AA0A6"};
+}
+
+// Selector de parcela catastral para un crédito. Más de la mitad de las
+// parcelas no tiene RENSPA, nombre ni chacra: para esas la única forma de
+// encontrarlas es ubicarlas en el mapa y hacer clic, por eso el buscador y el
+// mapa trabajan juntos. Con soloLectura sirve para ver dónde está una parcela.
+function SelectorParcelaModal({credito,enfocar,soloLectura,onAsignar,onClose}){
+  const parcelario=useParcelario(true);
+  const vista=useVistaMapa();
+  const deptoCredito=DEPTO_COD_POR_NOMBRE[credito.departamento]||"";
+  const[depto,setDepto]=useState(enfocar?.depto||deptoCredito);
+  const[consulta,setConsulta]=useState("");
+  const[sel,setSel]=useState(null);
+  const[hover,setHover]=useState(null);
+  const asignadas=useMemo(()=>new Set((credito.parcelas||[]).map(p=>p.id)),[credito.parcelas]);
+
+  useEffect(()=>{
+    if(enfocar){const[x,y]=geoASvg(enfocar.lon,enfocar.lat);vista.irA([x-0.6,y-0.6,x+0.6,y+0.6],0);}
+    else{const bb=bboxDepto(DEPTO_CODIGO[deptoCredito]);if(bb)vista.irA(bb,0.04);}
+  },[]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{
+    const p=enfocar&&parcelario.datos?.porId.get(enfocar.id);
+    if(p){setSel(p);vista.irA(p.bb,0.8);}
+  },[parcelario.datos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resultados=useMemo(()=>parcelario.datos?buscarParcelas(parcelario.datos,consulta,depto):[],[parcelario.datos,consulta,depto]);
+  const enVista=useMemo(()=>parcelario.datos?parcelasEnVista(parcelario.datos,vista.vb,5000):null,[parcelario.datos,vista.vb]);
+  const propias=useMemo(()=>parcelario.datos?[...asignadas].map(id=>parcelario.datos.porId.get(id)).filter(Boolean):[],[parcelario.datos,asignadas]);
+
+  function cambiarDepto(cod){
+    setDepto(cod);
+    const bb=cod?bboxDepto(DEPTO_CODIGO[cod]):null;
+    if(bb)vista.irA(bb,0.04);else vista.reset();
+  }
+  function elegir(p,centrar){setSel(p);if(centrar)vista.irA(p.bb,0.8);}
+  const k=vista.k;
+
+  return <div style={{position:"fixed",inset:0,background:"rgba(35,30,15,0.55)",zIndex:70,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div style={{background:"#FBFAF4",borderRadius:12,width:1100,maxWidth:"100%",height:"min(760px,100%)",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #E4DFCF"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:15,color:"#23362B"}}>{soloLectura?"Parcela catastral":"Ubicar en parcela catastral"}</div>
+          <div style={{fontSize:11.5,color:"#8A8470"}}>{credito.productor.nombre} · Expte. {credito.expediente}</div>
+        </div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+      </div>
+
+      <div style={{flex:1,display:"flex",minHeight:0,flexWrap:"wrap"}}>
+        {!soloLectura&&<div style={{width:310,maxWidth:"100%",borderRight:"1px solid #E4DFCF",padding:12,display:"flex",flexDirection:"column",minHeight:0}}>
+          <Campo label="Departamento">
+            <select style={iS} value={depto} onChange={e=>cambiarDepto(e.target.value)}>
+              <option value="">Toda la provincia</option>
+              {Object.entries(DEPTO_CODIGO).map(([c,n])=><option key={c} value={c}>{n}</option>)}
+            </select>
+          </Campo>
+          <Campo label="Buscar por RENSPA, establecimiento o chacra">
+            <div style={{position:"relative"}}>
+              <Search size={13} style={{position:"absolute",left:9,top:11,color:"#9A9482"}}/>
+              <input style={{...iS,paddingLeft:28}} value={consulta} onChange={e=>setConsulta(e.target.value)} placeholder="Ej: 06.001.0.00123, La Esperanza, 204" autoFocus/>
+            </div>
+          </Campo>
+          <div style={{flex:1,overflowY:"auto",border:"1px solid #E4DFCF",borderRadius:8,background:"#fff"}}>
+            {parcelario.estado==="cargando"&&<div style={{padding:12,fontSize:12,color:"#8A8470"}}>Cargando parcelario…</div>}
+            {parcelario.datos&&!consulta.trim()&&<div style={{padding:12,fontSize:11.5,color:"#8A8470",lineHeight:1.5}}>
+              Escribí un dato para buscar, o hacé clic sobre la parcela en el mapa. Muchas parcelas no tienen RENSPA, nombre ni chacra cargados: a esas se llega sólo por el mapa.
+            </div>}
+            {parcelario.datos&&consulta.trim()&&resultados.length===0&&<div style={{padding:12,fontSize:12,color:"#8A8470"}}>Sin resultados{depto?` en ${DEPTO_CODIGO[depto]}`:""}.</div>}
+            {resultados.map(p=><button key={p.id} onClick={()=>elegir(p,true)}
+              style={{display:"block",width:"100%",textAlign:"left",border:"none",borderBottom:"1px solid #F0ECDD",background:sel===p?"#FFF3D6":"transparent",padding:"7px 10px",cursor:"pointer",fontFamily:"inherit"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#23362B"}}>{p.nombre||(p.chacra?`Chacra ${p.chacra}`:"Sin nombre")}{asignadas.has(p.id)&&<span style={{color:"var(--color-success)",fontWeight:600}}> · ya asignada</span>}</div>
+              <div style={{fontSize:10.5,color:"#8A8470"}}>{describirParcela({...p,deptoNombre:DEPTO_CODIGO[p.depto],nombre:""})}</div>
+            </button>)}
+            {resultados.length>=40&&<div style={{padding:"6px 10px",fontSize:10.5,color:"#9A9482"}}>Se muestran los primeros 40. Afiná la búsqueda.</div>}
+          </div>
+        </div>}
+
+        <div style={{flex:"1 1 400px",minWidth:0,overflow:"auto",background:"#EAF2FA",padding:10}}>
+        {/* El ancho se limita para que el mapa (proporción 640×440) entre en el alto del modal. */}
+        <div style={{position:"relative",margin:"0 auto",maxWidth:"calc((min(760px, 100vh - 32px) - 100px) * 1.4545)"}}>
+          <ControlesZoom vista={vista}/>
+          <svg ref={vista.svgRef} viewBox={vista.vbStr} width="100%" onPointerDown={vista.onPointerDown}
+            style={{display:"block",border:"1px solid #9BBAD4",borderRadius:8,background:"#EAF2FA",cursor:vista.arrastrando?"grabbing":"grab",touchAction:"none",userSelect:"none"}}>
+            {CHUBUT_DEPTOS_SVG.map((dep,i)=><path key={i} d={dep.d} fill="#F4F1E6" stroke="#8A8470" strokeWidth={1} vectorEffect="non-scaling-stroke"/>)}
+            {enVista&&enVista.lista.map(p=><path key={p.id} d={pathParcela(p)} fillRule="evenodd"
+              fill={hover===p?"#FFE9A8":"#FFFFFF"} fillOpacity={hover===p?0.9:0.55}
+              stroke="#6B5B3E" strokeWidth={0.6} vectorEffect="non-scaling-stroke" style={{cursor:soloLectura?"inherit":"pointer"}}
+              onMouseEnter={()=>setHover(p)} onMouseLeave={()=>setHover(h=>h===p?null:h)}
+              onClick={()=>{if(!soloLectura&&!vista.fueArrastre())elegir(p,false);}}/>)}
+            {propias.map(p=><path key={"a"+p.id} d={pathParcela(p)} fillRule="evenodd" fill="var(--color-success)" fillOpacity={0.4}
+              stroke="var(--color-success)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" style={{pointerEvents:"none"}}/>)}
+            {sel&&<path d={pathParcela(sel)} fillRule="evenodd" fill="#FF8540" fillOpacity={0.45} stroke="#C2410C" strokeWidth={2.4}
+              vectorEffect="non-scaling-stroke" style={{pointerEvents:"none"}}/>}
+            {CHUBUT_CIUDADES.map((c,i)=><g key={i} style={{pointerEvents:"none"}}>
+              <circle cx={c.x} cy={c.y} r={2*k} fill="#14181F" stroke="#fff" strokeWidth={0.6*k}/>
+              <text x={c.x+4*k} y={c.y+3*k} fontSize={8*k} fill="#14181F" stroke="#fff" strokeWidth={2*k} paintOrder="stroke">{c.nombre}</text>
+            </g>)}
+          </svg>
+          {parcelario.estado==="cargando"&&<div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",background:"#fff",borderRadius:6,padding:"5px 12px",fontSize:12,color:"#5B6B63",boxShadow:"0 2px 6px rgba(0,0,0,0.15)"}}>Cargando parcelario…</div>}
+          {parcelario.estado==="error"&&<div style={{position:"absolute",top:10,left:10,right:50,background:"#FBF1EE",border:"1px solid var(--color-danger)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"var(--color-danger)"}}>
+            No se pudo cargar el parcelario ({parcelario.error}). Verificá que el archivo esté publicado en <code>{PARCELARIO_URL}</code>.
+          </div>}
+          {enVista?.excede&&<div style={{position:"absolute",top:10,left:"50%",transform:"translateX(-50%)",background:"rgba(255,255,255,0.94)",borderRadius:6,padding:"4px 12px",fontSize:11.5,color:"#5B6B63",pointerEvents:"none"}}>Acercá el mapa o elegí un departamento para ver las parcelas</div>}
+          {hover&&hover!==sel&&<div style={{position:"absolute",top:44,left:10,maxWidth:"60%",background:"rgba(255,255,255,0.95)",borderRadius:6,padding:"4px 10px",fontSize:11.5,color:"#1A2B4A",boxShadow:"0 2px 6px rgba(0,0,0,0.15)",pointerEvents:"none"}}>
+            {describirParcela({...hover,deptoNombre:DEPTO_CODIGO[hover.depto]})}
+          </div>}
+          {sel&&<div style={{position:"absolute",left:10,right:10,bottom:10,background:"#fff",border:"1px solid #E4DFCF",borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"0 4px 14px rgba(0,0,0,0.15)"}}>
+            <div style={{fontSize:12,color:"#23362B",minWidth:0}}>
+              <div style={{fontWeight:700,marginBottom:2}}>{soloLectura?"Parcela asignada":"Parcela seleccionada"}</div>
+              <div style={{color:"#5B6B63"}}>{describirParcela({...sel,deptoNombre:DEPTO_CODIGO[sel.depto]})}</div>
+            </div>
+            {!soloLectura&&(asignadas.has(sel.id)
+              ?<span style={{fontSize:12,color:"var(--color-success)",fontWeight:700}}>Ya está asignada a este crédito</span>
+              :<Boton icon={MapPin} onClick={()=>onAsignar(fichaParcela(sel))}>Asignar esta parcela</Boton>)}
+          </div>}
+        </div>
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+function MapaChubutRegional({datos,tots,tema,creditos=[],onAbrirCredito}){
   const COL = {
     "Norte": (tema&&tema.colorRegionNorte)||"#ffb109",
     "Sur": (tema&&tema.colorRegionSur)||"#ff8540",
@@ -2412,68 +2786,78 @@ function MapaChubutRegional({datos,tots,tema}){
   ];
 
   const[hoverDept,setHoverDept]=useState(null);
+  const vista=useVistaMapa();
+  const{vb,k}=vista;
+  const[verProductores,setVerProductores]=useState(true);
+  const[verParcelas,setVerParcelas]=useState(false);
+  const parcelario=useParcelario(verParcelas);
+  const[hoverParcela,setHoverParcela]=useState(null);
+  const[ubicSelId,setUbicSelId]=useState(null);
+  const CE=coloresEstado(tema);
 
-  // ── Zoom / Pan ──
-  const svgRef=React.useRef(null);
-  const dragRef=React.useRef(null);
-  const[vb,setVb]=useState({...CHUBUT_MAP_VIEWBOX_BASE});
-  function clampVb(next){
-    const base=CHUBUT_MAP_VIEWBOX_BASE;
-    const minW=base.w*0.15, maxW=base.w*1.4;
-    const w=Math.max(minW,Math.min(maxW,next.w));
-    const h=w*(base.h/base.w);
-    const x=Math.max(base.x-base.w*0.2,Math.min(base.x+base.w-w+base.w*0.2,next.x));
-    const y=Math.max(base.y-base.h*0.2,Math.min(base.y+base.h-h+base.h*0.2,next.y));
-    return{x,y,w,h};
+  // Una ubicación por parcela, con todos los créditos que la usan. El color
+  // del marcador es el del crédito en peor situación.
+  const ubicaciones=useMemo(()=>{
+    const m=new Map();
+    creditos.forEach(c=>(c.parcelas||[]).forEach(pa=>{
+      if(pa.lat==null||pa.lon==null)return;
+      let u=m.get(pa.id);
+      if(!u){const[x,y]=geoASvg(pa.lon,pa.lat);u={id:pa.id,x,y,ficha:pa,creditos:[]};m.set(pa.id,u);}
+      if(!u.creditos.includes(c))u.creditos.push(c);
+    }));
+    return[...m.values()].map(u=>({...u,estado:u.creditos.map(calcularEstado).sort((a,b)=>(ORDEN_GRAVEDAD[b]||0)-(ORDEN_GRAVEDAD[a]||0))[0]}));
+  },[creditos]);
+  const creditosUbicados=useMemo(()=>creditos.filter(c=>(c.parcelas||[]).some(p=>p.lat!=null))
+    .sort((a,b)=>a.productor.nombre.localeCompare(b.productor.nombre)),[creditos]);
+  const ubicSel=ubicaciones.find(u=>u.id===ubicSelId)||null;
+
+  const capaParcelas=verParcelas&&parcelario.datos;
+  const enVista=useMemo(()=>capaParcelas?parcelasEnVista(parcelario.datos,vb,4000):null,[capaParcelas,parcelario.datos,vb]);
+  const ocupadas=useMemo(()=>capaParcelas?ubicaciones.map(u=>({u,p:parcelario.datos.porId.get(u.id)})).filter(x=>x.p):[],[capaParcelas,parcelario.datos,ubicaciones]);
+  // De cerca, los colores de las regionales se atenúan para que se lean las parcelas.
+  const atenuar=capaParcelas&&k<0.15;
+
+  function irAUbicacion(id){
+    const u=ubicaciones.find(x=>x.id===id);if(!u)return;
+    const p=parcelario.datos?.porId.get(id);
+    if(p)vista.irA(p.bb,0.8);else vista.irA([u.x-0.8,u.y-0.8,u.x+0.8,u.y+0.8],0);
+    setUbicSelId(id);
   }
-  function zoomBy(factor){
-    setVb(cur=>{
-      const nw=cur.w*factor, nh=cur.h*factor;
-      return clampVb({x:cur.x+(cur.w-nw)/2,y:cur.y+(cur.h-nh)/2,w:nw,h:nh});
-    });
-  }
-  function onWheel(e){
-    e.preventDefault();
-    const factor=e.deltaY>0?1.15:1/1.15;
-    const svg=svgRef.current; if(!svg)return;
-    const rect=svg.getBoundingClientRect();
-    const px=(e.clientX-rect.left)/rect.width, py=(e.clientY-rect.top)/rect.height;
-    setVb(cur=>{
-      const nw=cur.w*factor, nh=cur.h*factor;
-      return clampVb({x:cur.x+(cur.w-nw)*px,y:cur.y+(cur.h-nh)*py,w:nw,h:nh});
-    });
-  }
-  function onMouseDown(e){ dragRef.current={startX:e.clientX,startY:e.clientY,vb0:vb}; }
-  function onMouseMove(e){
-    if(!dragRef.current)return;
-    const svg=svgRef.current; if(!svg)return;
-    const rect=svg.getBoundingClientRect();
-    const dx=(e.clientX-dragRef.current.startX)/rect.width*dragRef.current.vb0.w;
-    const dy=(e.clientY-dragRef.current.startY)/rect.height*dragRef.current.vb0.h;
-    setVb(clampVb({x:dragRef.current.vb0.x-dx,y:dragRef.current.vb0.y-dy,w:dragRef.current.vb0.w,h:dragRef.current.vb0.h}));
-  }
-  function onMouseUp(){ dragRef.current=null; }
-  const vbStr=`${vb.x.toFixed(1)} ${vb.y.toFixed(1)} ${vb.w.toFixed(1)} ${vb.h.toFixed(1)}`;
 
   return <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
 
     {/* Mapa SVG con los 15 departamentos reales, coloreados por regional */}
-    <div style={{flex:"1 1 480px",minWidth:280,position:"relative"}}>
-      <div style={{position:"absolute",top:8,right:8,zIndex:5,display:"flex",flexDirection:"column",gap:4}}>
-        <button onClick={()=>zoomBy(0.75)} title="Acercar" style={{width:26,height:26,borderRadius:6,border:"1px solid #9BBAD4",background:"#fff",cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1,color:"#1A2B4A"}}>+</button>
-        <button onClick={()=>zoomBy(1/0.75)} title="Alejar" style={{width:26,height:26,borderRadius:6,border:"1px solid #9BBAD4",background:"#fff",cursor:"pointer",fontWeight:700,fontSize:14,lineHeight:1,color:"#1A2B4A"}}>–</button>
-        <button onClick={()=>setVb({...CHUBUT_MAP_VIEWBOX_BASE})} title="Restablecer vista" style={{width:26,height:26,borderRadius:6,border:"1px solid #9BBAD4",background:"#fff",cursor:"pointer",fontSize:11,lineHeight:1,color:"#1A2B4A"}}>⟲</button>
+    <div style={{flex:"1 1 480px",minWidth:280}}>
+      <div className="no-imprimir" style={{display:"flex",gap:14,alignItems:"center",flexWrap:"wrap",marginBottom:8,fontSize:11.5,color:"#23362B"}}>
+        <label style={{display:"inline-flex",alignItems:"center",gap:5,cursor:"pointer"}}>
+          <input type="checkbox" checked={verProductores} onChange={e=>setVerProductores(e.target.checked)}/>
+          Productores ubicados <span style={{color:"#8A8470"}}>({creditosUbicados.length} de {creditos.length})</span>
+        </label>
+        <label style={{display:"inline-flex",alignItems:"center",gap:5,cursor:"pointer"}}>
+          <input type="checkbox" checked={verParcelas} onChange={e=>setVerParcelas(e.target.checked)}/>
+          Parcelas catastrales{parcelario.estado==="cargando"&&<span style={{color:"#8A8470"}}> (cargando…)</span>}
+        </label>
+        {creditosUbicados.length>0&&<select style={{...iS,width:250,padding:"5px 8px",fontSize:12}} value="" onChange={e=>irAUbicacion(e.target.value)}>
+          <option value="">Ir a un productor…</option>
+          {creditosUbicados.flatMap(c=>(c.parcelas||[]).filter(p=>p.lat!=null).map(p=>
+            <option key={c.id+p.id} value={p.id}>{c.productor.nombre} — Expte. {c.expediente}{(c.parcelas||[]).length>1?` (${p.deptoNombre})`:""}</option>))}
+        </select>}
       </div>
-      <svg ref={svgRef} viewBox={vbStr} width="100%"
-        onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
-        style={{border:"1px solid #9BBAD4",borderRadius:10,background:"#EAF2FA",display:"block",cursor:dragRef.current?"grabbing":"grab",touchAction:"none"}}>
+      {parcelario.estado==="error"&&<div className="no-imprimir" style={{fontSize:11.5,color:"var(--color-danger)",marginBottom:6}}>
+        No se pudo cargar el parcelario ({parcelario.error}). Verificá que el archivo esté publicado en <code>{PARCELARIO_URL}</code>.
+      </div>}
+      <div style={{position:"relative"}}>
+      <ControlesZoom vista={vista}/>
+      <svg ref={vista.svgRef} viewBox={vista.vbStr} width="100%" onPointerDown={vista.onPointerDown}
+        style={{border:"1px solid #9BBAD4",borderRadius:10,background:"#EAF2FA",display:"block",cursor:vista.arrastrando?"grabbing":"grab",touchAction:"none",userSelect:"none"}}>
         {CHUBUT_DEPTOS_SVG.map((dep,i)=>
           <path key={i}
             d={dep.d}
             fill={COL[dep.regional]||COL["Sin asignar"]}
-            fillOpacity={hoverDept===dep.nombre?1:op(dep.regional)}
+            fillOpacity={(hoverDept===dep.nombre?1:op(dep.regional))*(atenuar?0.3:1)}
             stroke={hoverDept===dep.nombre?"#000":"#1A2B4A"}
             strokeWidth={hoverDept===dep.nombre?1.6:0.7}
+            vectorEffect="non-scaling-stroke"
             style={{cursor:"pointer",transition:"fill-opacity .12s,stroke-width .12s"}}
             onMouseEnter={()=>setHoverDept(dep.nombre)}
             onMouseLeave={()=>setHoverDept(null)}
@@ -2482,26 +2866,70 @@ function MapaChubutRegional({datos,tots,tema}){
           </path>
         )}
 
+        {/* Parcelario: todas las parcelas en vista y, resaltadas, las de productores con crédito */}
+        {enVista&&enVista.lista.map(p=>
+          <path key={p.id} d={pathParcela(p)} fillRule="evenodd"
+            fill={hoverParcela===p?"#FFF6D8":"#FFFFFF"} fillOpacity={hoverParcela===p?0.85:0.35}
+            stroke="#6B5B3E" strokeWidth={0.5} vectorEffect="non-scaling-stroke"
+            onMouseEnter={()=>setHoverParcela(p)} onMouseLeave={()=>setHoverParcela(h=>h===p?null:h)}/>
+        )}
+        {verProductores&&ocupadas.map(({u,p})=>
+          <path key={"o"+p.id} d={pathParcela(p)} fillRule="evenodd"
+            fill={CE[u.estado]} fillOpacity={0.45} stroke={CE[u.estado]} strokeWidth={ubicSelId===u.id?2.5:1.4}
+            vectorEffect="non-scaling-stroke" style={{cursor:"pointer"}}
+            onMouseEnter={()=>setHoverParcela(p)} onMouseLeave={()=>setHoverParcela(h=>h===p?null:h)}
+            onClick={()=>{if(!vista.fueArrastre())setUbicSelId(id=>id===u.id?null:u.id);}}/>
+        )}
+
         {/* Nombres de las Direcciones/Delegación Regionales, directamente sobre el mapa */}
-        {Object.entries(CHUBUT_REG_CENTROIDE).map(([reg,pos])=>
+        {k>0.12&&Object.entries(CHUBUT_REG_CENTROIDE).map(([reg,pos])=>
           <g key={reg} style={{pointerEvents:"none"}}>
-            <text x={pos[0]} y={pos[1]} textAnchor="middle" fontSize="15" fontWeight="800" fill="#14181F"
-              stroke="#fff" strokeWidth="3.2" paintOrder="stroke" style={{fontFamily:"'Rubik',sans-serif"}}>{reg}</text>
-            <text x={pos[0]} y={pos[1]+15} textAnchor="middle" fontSize="11" fontWeight="700" fill="#14181F"
-              stroke="#fff" strokeWidth="2.8" paintOrder="stroke">{rd[reg]||0} crédito{(rd[reg]||0)!==1?"s":""}</text>
+            <text x={pos[0]} y={pos[1]} textAnchor="middle" fontSize={15*k} fontWeight="800" fill="#14181F"
+              stroke="#fff" strokeWidth={3.2*k} paintOrder="stroke" style={{fontFamily:"'Rubik',sans-serif"}}>{reg}</text>
+            <text x={pos[0]} y={pos[1]+15*k} textAnchor="middle" fontSize={11*k} fontWeight="700" fill="#14181F"
+              stroke="#fff" strokeWidth={2.8*k} paintOrder="stroke">{rd[reg]||0} crédito{(rd[reg]||0)!==1?"s":""}</text>
           </g>
         )}
 
         {/* Localidades principales */}
         {CHUBUT_CIUDADES.map((c,i)=>
           <g key={i} style={{pointerEvents:"none"}}>
-            <circle cx={c.x} cy={c.y} r="2.2" fill="#14181F" stroke="#fff" strokeWidth="0.6"/>
-            <text x={c.x+4} y={c.y+3} fontSize="7.5" fill="#14181F" stroke="#fff" strokeWidth="2" paintOrder="stroke">{c.nombre}</text>
+            <circle cx={c.x} cy={c.y} r={2.2*k} fill="#14181F" stroke="#fff" strokeWidth={0.6*k}/>
+            <text x={c.x+4*k} y={c.y+3*k} fontSize={7.5*k} fill="#14181F" stroke="#fff" strokeWidth={2*k} paintOrder="stroke">{c.nombre}</text>
           </g>
         )}
+
+        {/* Productores con crédito, en su parcela */}
+        {verProductores&&ubicaciones.map(u=>{
+          const r=(ubicSelId===u.id?5.5:4.2)*k;
+          return <g key={u.id} transform={`translate(${u.x},${u.y})`} style={{cursor:"pointer"}}
+            onClick={()=>{if(!vista.fueArrastre())setUbicSelId(id=>id===u.id?null:u.id);}}>
+            <circle r={r} fill={CE[u.estado]} stroke="#fff" strokeWidth={1.2*k}/>
+            {u.creditos.length>1&&<text y={r*0.4} textAnchor="middle" fontSize={5.5*k} fontWeight="800" fill="#fff" style={{pointerEvents:"none"}}>{u.creditos.length}</text>}
+            <title>{u.creditos.map(c=>c.productor.nombre).join(", ")} — {describirParcela(u.ficha)}</title>
+          </g>;
+        })}
       </svg>
-      {hoverDept&&<div style={{position:"absolute",bottom:8,left:8,background:"rgba(255,255,255,0.95)",borderRadius:6,padding:"4px 10px",fontSize:11.5,fontWeight:700,color:"#1A2B4A",boxShadow:"0 2px 6px rgba(0,0,0,0.15)"}}>{hoverDept}</div>}
-      <div style={{position:"absolute",bottom:8,right:8,background:"rgba(255,255,255,0.85)",borderRadius:5,padding:"3px 8px",fontSize:9,color:"#4A6070"}}>Rueda: zoom · Arrastrar: mover</div>
+      {ubicSel&&<div className="no-imprimir" style={{position:"absolute",top:8,left:8,zIndex:6,background:"rgba(255,255,255,0.97)",border:"1px solid #9BBAD4",borderRadius:8,padding:"8px 10px",width:290,maxWidth:"calc(100% - 60px)",fontSize:11.5,color:"#23362B",boxShadow:"0 2px 10px rgba(0,0,0,0.18)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:3}}>
+          <b style={{fontSize:12}}>Parcela catastral</b>
+          <button onClick={()=>setUbicSelId(null)} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470",padding:0,display:"flex"}}><X size={14}/></button>
+        </div>
+        <div style={{color:"#5B6B63",marginBottom:6}}>{describirParcela(ubicSel.ficha)}</div>
+        {ubicSel.creditos.map(c=>{const e=calcularEstado(c);return <div key={c.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,borderTop:"1px solid #EEE9D9",padding:"5px 0"}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontWeight:700}}>{c.productor.nombre}</div>
+            <div style={{fontSize:10.5,color:"#8A8470"}}>Expte. {c.expediente} · <span style={{color:CE[e],fontWeight:700}}>{ESTADO_LABELS[e]}</span></div>
+          </div>
+          {onAbrirCredito&&<button onClick={()=>onAbrirCredito(c)} style={{...iBtn,fontSize:11,whiteSpace:"nowrap"}}>Abrir</button>}
+        </div>;})}
+      </div>}
+      {enVista?.excede&&<div className="no-imprimir" style={{position:"absolute",top:8,left:"50%",transform:"translateX(-50%)",background:"rgba(255,255,255,0.92)",borderRadius:6,padding:"3px 10px",fontSize:11,color:"#5B6B63",pointerEvents:"none"}}>Acercá el mapa para ver los límites de las parcelas</div>}
+      {(hoverParcela||hoverDept)&&<div style={{position:"absolute",bottom:8,left:8,maxWidth:"70%",background:"rgba(255,255,255,0.95)",borderRadius:6,padding:"4px 10px",fontSize:11.5,fontWeight:700,color:"#1A2B4A",boxShadow:"0 2px 6px rgba(0,0,0,0.15)"}}>
+        {hoverParcela?describirParcela({...hoverParcela,deptoNombre:DEPTO_CODIGO[hoverParcela.depto]})||"Parcela sin datos":hoverDept}
+      </div>}
+      <div className="no-imprimir" style={{position:"absolute",bottom:8,right:8,background:"rgba(255,255,255,0.85)",borderRadius:5,padding:"3px 8px",fontSize:9,color:"#4A6070"}}>Rueda: zoom · Arrastrar: mover</div>
+      </div>
     </div>
 
     {/* Panel de referencia */}
@@ -2520,6 +2948,14 @@ function MapaChubutRegional({datos,tots,tema}){
       )}
       {(rd["Sin asignar"]||0)>0 && <div style={{fontSize:9.5,color:"#9A9482",marginTop:3}}>Sin asignar: {rd["Sin asignar"]}</div>}
       <div style={{marginTop:8,fontSize:9,color:"#9A9482"}}>Total: <b style={{color:"#23362B"}}>{tots?.total||0}</b></div>
+      {verProductores&&ubicaciones.length>0&&<div style={{marginTop:10}}>
+        <div style={{fontWeight:700,fontSize:10,color:"#5B6B63",marginBottom:5,textTransform:"uppercase",letterSpacing:"0.06em"}}>Productores</div>
+        {[["MORA","En mora"],["AL_DIA","Al día"],["CANCELADO","Cancelado"]].map(([e,l])=>
+          <div key={e} style={{display:"flex",alignItems:"center",gap:6,fontSize:10.5,color:"#5B6B63",marginBottom:3}}>
+            <span style={{width:10,height:10,borderRadius:"50%",background:CE[e],border:"1.5px solid #fff",boxShadow:"0 0 0 1px #C9C2A6"}}/>{l}
+          </div>)}
+        <div style={{fontSize:9,color:"#9A9482",marginTop:4,lineHeight:1.4}}>Un número en el marcador indica varios créditos en la misma parcela.</div>
+      </div>}
       <div style={{marginTop:10,fontSize:9,color:"#9A9482",lineHeight:1.5}}>Refleja los créditos según los filtros aplicados en la pantalla de inicio.</div>
     </div>
   </div>;
@@ -2717,6 +3153,7 @@ function CrecerApp(){
         #print-area th,#print-area td{border:1px solid #999;padding:4px 8px;font-size:10pt;}
         #print-area th{background:#eee;font-weight:700;}
         #print-area svg{max-width:100%;height:auto;}
+        .no-imprimir{display:none!important;}
         #print-area .grafico-print{page-break-inside:avoid;margin-bottom:16px;}
         #print-area .grafico-titulo{font-family:Inter,sans-serif;font-size:12pt;font-weight:700;margin-bottom:6px;color:#23362B;}
         .sello-cancelado{position:fixed;font-size:110pt;}
@@ -2793,7 +3230,7 @@ function CrecerApp(){
           {/* Mapa de Chubut por regionales */}
           <div className="grafico-print" style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,padding:"16px 18px",marginBottom:20}}>
             <div className="grafico-titulo" style={{fontWeight:700,fontSize:13,color:"#23362B",marginBottom:12}}>Distribución por Dirección Regional — Chubut</div>
-            <MapaChubutRegional datos={datosReg} tots={tots} tema={tema}/>
+            <MapaChubutRegional datos={datosReg} tots={tots} tema={tema} creditos={filtrados} onAbrirCredito={setSelected}/>
           </div>
           </div>
 
