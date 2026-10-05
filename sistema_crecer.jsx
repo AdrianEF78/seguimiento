@@ -2465,7 +2465,7 @@ function decodificarParcelario(json){
       renspa:renspa||"",nombre:nombre||"",chacra:chacra||"",anillos:rs,bb:[x0,y0,x1,y1],
       txt:normalizarTxt(`${renspa||""} ${nombre||""} ${chacra||""}`)};
   });
-  return{lista,porId:new Map(lista.map(p=>[p.id,p]))};
+  return{lista,porId:new Map(lista.map(p=>[p.id,p])),porRenspa:new Map(lista.filter(p=>p.renspa).map(p=>[p.renspa,p]))};
 }
 
 function useParcelario(activo){
@@ -2530,7 +2530,8 @@ function fichaParcela(p){
 }
 function fmtHa(h){const n=Number(h||0);return n.toLocaleString("es-AR",{maximumFractionDigits:n<10?2:n<1000?1:0});}
 function describirParcela(f){
-  return[f.deptoNombre||DEPTO_CODIGO[f.depto],f.chacra&&`Chacra ${f.chacra}`,f.nombre,f.renspa&&`RENSPA ${f.renspa}`,f.ha!=null&&`${fmtHa(f.ha)} ha`].filter(Boolean).join(" · ");
+  return[f.deptoNombre||DEPTO_CODIGO[f.depto],f.chacra&&`Chacra ${f.chacra}`,f.nombre,f.renspa&&`RENSPA ${f.renspa}`,f.ha!=null&&`${fmtHa(f.ha)} ha`,
+    f.tipo==="punto"&&"punto del padrón (sin parcela catastral)"].filter(Boolean).join(" · ");
 }
 
 const bboxDeptoCache={};
@@ -2639,6 +2640,162 @@ function ControlesZoom({vista}){
   </div>;
 }
 
+// ─── Padrón RENSPA ────────────────────────────────────────────────────────────
+// El padrón trae nombre y CUIT de todos los titulares de la provincia, así que
+// no se publica con el sistema: el administrador elige el archivo, se lee en
+// su navegador y a cada crédito sólo se le copian RENSPA, establecimiento y
+// ubicación. Queda en memoria mientras dure la sesión.
+let padronSesion=null;
+
+// Lector mínimo de .xlsx (un .zip con XML) para no sumar una dependencia:
+// devuelve las filas de la primera hoja.
+async function leerXlsx(buf){
+  const dv=new DataView(buf),u8=new Uint8Array(buf),dec=new TextDecoder();
+  let eocd=-1;
+  for(let i=buf.byteLength-22;i>=Math.max(0,buf.byteLength-65557);i--)if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}
+  if(eocd<0)throw new Error("El archivo no es un Excel (.xlsx) válido.");
+  const archivos={};
+  let p=dv.getUint32(eocd+16,true);
+  for(let i=0,n=dv.getUint16(eocd+10,true);i<n&&dv.getUint32(p,true)===0x02014b50;i++){
+    const ln=dv.getUint16(p+28,true);
+    archivos[dec.decode(u8.subarray(p+46,p+46+ln))]={metodo:dv.getUint16(p+10,true),tam:dv.getUint32(p+20,true),off:dv.getUint32(p+42,true)};
+    p+=46+ln+dv.getUint16(p+30,true)+dv.getUint16(p+32,true);
+  }
+  async function texto(nombre){
+    const a=archivos[nombre];if(!a)return null;
+    const ini=a.off+30+dv.getUint16(a.off+26,true)+dv.getUint16(a.off+28,true);
+    const datos=u8.subarray(ini,ini+a.tam);
+    if(a.metodo===0)return dec.decode(datos);
+    if(a.metodo!==8)throw new Error("El Excel usa una compresión no soportada. Guardalo de nuevo como .xlsx.");
+    return new Response(new Blob([datos]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text();
+  }
+  const xml=s=>new DOMParser().parseFromString(s,"application/xml");
+  const compartidos=[];
+  const ss=await texto("xl/sharedStrings.xml");
+  if(ss)for(const si of xml(ss).getElementsByTagName("si")){
+    let t="";
+    for(const n of si.getElementsByTagName("t"))if(n.parentNode.nodeName!=="rPh")t+=n.textContent;
+    compartidos.push(t);
+  }
+  let ruta="xl/worksheets/sheet1.xml";
+  const wbx=await texto("xl/workbook.xml"),rels=await texto("xl/_rels/workbook.xml.rels");
+  const hoja=wbx&&xml(wbx).getElementsByTagName("sheet")[0];
+  const rid=hoja&&(hoja.getAttribute("r:id")||hoja.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships","id"));
+  if(rid&&rels)for(const r of xml(rels).getElementsByTagName("Relationship"))
+    if(r.getAttribute("Id")===rid){const t=r.getAttribute("Target");ruta=t.startsWith("/")?t.slice(1):"xl/"+t.replace(/^\.\//,"");}
+  const hojaTxt=await texto(ruta);
+  if(!hojaTxt)throw new Error("No se encontró la primera hoja del Excel.");
+  const colIdx=ref=>{const m=/^[A-Z]+/.exec(ref);if(!m)return -1;let n=0;for(const ch of m[0])n=n*26+ch.charCodeAt(0)-64;return n-1;};
+  const filas=[];
+  for(const row of xml(hojaTxt).getElementsByTagName("row")){
+    const f=[];
+    for(const c of row.getElementsByTagName("c")){
+      const ci=colIdx(c.getAttribute("r")||""),t=c.getAttribute("t"),v=c.getElementsByTagName("v")[0]?.textContent;
+      const val=t==="s"?compartidos[+v]:t==="inlineStr"?c.getElementsByTagName("t")[0]?.textContent:t==="str"||t==="e"?v:v==null?"":(isNaN(+v)?v:+v);
+      f[ci<0?f.length:ci]=val;
+    }
+    filas.push(f);
+  }
+  return filas;
+}
+
+function leerCsv(txt){
+  const primera=txt.split(/\r?\n/,1)[0];
+  const sep=(primera.match(/;/g)||[]).length>(primera.match(/,/g)||[]).length?";":",";
+  const filas=[];let f=[],campo="",q=false;
+  for(let i=0;i<txt.length;i++){
+    const ch=txt[i];
+    if(q){if(ch==='"'){if(txt[i+1]==='"'){campo+='"';i++;}else q=false;}else campo+=ch;}
+    else if(ch==='"')q=true;
+    else if(ch===sep){f.push(campo);campo="";}
+    else if(ch==="\n"){f.push(campo.replace(/\r$/,""));filas.push(f);f=[];campo="";}
+    else campo+=ch;
+  }
+  if(campo||f.length){f.push(campo);filas.push(f);}
+  return filas;
+}
+
+async function leerPadronRenspa(file){
+  const buf=await file.arrayBuffer();
+  let filas;
+  if(/\.xlsx$/i.test(file.name))filas=await leerXlsx(buf);
+  else if(/\.(csv|txt)$/i.test(file.name)){
+    let t=new TextDecoder("utf-8").decode(buf);
+    if(t.includes("�"))t=new TextDecoder("windows-1252").decode(buf);
+    filas=leerCsv(t.replace(/^﻿/,""));
+  }
+  else throw new Error("Elegí el padrón en Excel (.xlsx) o CSV. Un .xls antiguo hay que guardarlo antes como .xlsx.");
+  const iCab=filas.findIndex(f=>f&&f.some(v=>normalizarTxt(v).trim()==="RENSPA"));
+  if(iCab<0)throw new Error("No se encontró la columna RENSPA en el archivo.");
+  const cab=filas[iCab].map(v=>normalizarTxt(v).trim());
+  const col=(...n)=>cab.findIndex(c=>n.includes(c));
+  const ix={renspa:col("RENSPA"),est:col("ESTABLECIMIENTO"),tit:col("TITULAR","RAZON SOCIAL"),cuit:col("CUIT","CUIL","CUIT/CUIL"),
+    partido:col("PARTIDO","DEPARTAMENTO"),lat:col("LATITUD","LAT"),lon:col("LONGITUD","LONG","LON")};
+  const faltan=[["RENSPA",ix.renspa],["CUIT",ix.cuit],["Latitud",ix.lat],["Longitud",ix.lon]].filter(x=>x[1]<0).map(x=>x[0]);
+  if(faltan.length)throw new Error(`Faltan columnas en el padrón: ${faltan.join(", ")}.`);
+  const num=v=>{const n=typeof v==="number"?v:parseFloat(String(v??"").replace(",","."));return Number.isFinite(n)?n:null;};
+  const txt=v=>String(v??"").trim();
+  const registros=[];
+  for(const f of filas.slice(iCab+1)){
+    const renspa=f&&txt(f[ix.renspa]);
+    if(!renspa)continue;
+    registros.push({renspa,establecimiento:txt(f[ix.est]),titular:txt(f[ix.tit]),cuit:txt(f[ix.cuit]).replace(/\D/g,""),
+      partido:txt(f[ix.partido]),lat:num(f[ix.lat]),lon:num(f[ix.lon])});
+  }
+  if(!registros.length)throw new Error("El archivo no tiene registros con RENSPA.");
+  return{archivo:file.name,registros};
+}
+
+function deptoDesdePartido(p){
+  const n=normalizarTxt(p).replace(/[^A-Z ]/g,"").trim();
+  if(!n)return"";
+  return Object.values(DEPTO_CODIGO).find(d=>{const m=normalizarTxt(d);return m===n||n.startsWith(m)||m.startsWith(n);})||p;
+}
+const claveNombre=s=>normalizarTxt(s).replace(/[^A-Z0-9 ]/g," ").split(/\s+/).filter(Boolean).sort().join(" ");
+// Chubut está entre los paralelos 42° y 46° S; un punto fuera de ahí es un error del padrón.
+const enChubut=(lat,lon)=>lat!=null&&lon!=null&&lat<=-41.98&&lat>=-46.02&&lon>=-72.2&&lon<=-63.5;
+
+// Ubicación que le corresponde a un registro del padrón: su parcela si el
+// RENSPA está en el catastro, o si no un punto en las coordenadas declaradas.
+function ubicacionDesdePadron(rec,parcelario){
+  const p=parcelario?.porRenspa.get(rec.renspa);
+  if(p)return{ficha:{...fichaParcela(p),nombre:rec.establecimiento||p.nombre,origen:"padron"}};
+  if(!enChubut(rec.lat,rec.lon))return{problema:rec.lat==null?"Sin coordenadas en el padrón":"Coordenadas fuera de Chubut"};
+  return{ficha:{id:`P-${rec.renspa}`,tipo:"punto",renspa:rec.renspa,nombre:rec.establecimiento,deptoNombre:deptoDesdePartido(rec.partido),
+    lat:Math.round(rec.lat*1e5)/1e5,lon:Math.round(rec.lon*1e5)/1e5,origen:"padron",asignada:todayStr()}};
+}
+
+// Busca a cada productor en el padrón por CUIT; si el crédito tiene un DNI,
+// por los 8 dígitos centrales del CUIT; y si no aparece, por nombre (esas
+// coincidencias quedan sin marcar para revisarlas a mano).
+function proponerVinculos(creditos,registros,parcelario){
+  const porCuit=new Map(),porDni=new Map(),porNombre=new Map();
+  const agregar=(m,k,r)=>{if(!k)return;if(!m.has(k))m.set(k,[]);m.get(k).push(r);};
+  registros.forEach(r=>{
+    agregar(porCuit,r.cuit,r);
+    if(r.cuit.length===11)agregar(porDni,r.cuit.slice(2,10),r);
+    agregar(porNombre,claveNombre(r.titular),r);
+  });
+  return creditos.map(c=>{
+    const d=String(c.productor?.dni||"").replace(/\D/g,"");
+    let motivo=null,recs=[];
+    if(d.length===11&&porCuit.has(d)){motivo="CUIT";recs=porCuit.get(d);}
+    else if(d.length>=7&&d.length<=8&&porDni.has(d.padStart(8,"0"))){motivo="DNI";recs=porDni.get(d.padStart(8,"0"));}
+    else{const k=claveNombre(c.productor?.nombre);if(k&&porNombre.has(k)){motivo="nombre";recs=porNombre.get(k);}}
+    const actuales=c.parcelas||[];
+    const deptoCred=normalizarTxt(c.departamento);
+    const candidatos=recs.map(rec=>{
+      const u=ubicacionDesdePadron(rec,parcelario);
+      const yaVinculado=actuales.some(a=>a.renspa===rec.renspa||(u.ficha&&a.id===u.ficha.id));
+      return{clave:`${c.id}|${rec.renspa}`,rec,...u,yaVinculado,enSuDepto:!!deptoCred&&normalizarTxt(deptoDesdePartido(rec.partido))===deptoCred};
+    });
+    // Con varios RENSPA del mismo titular se proponen los del departamento del crédito.
+    const hayEnDepto=candidatos.some(x=>x.enSuDepto);
+    candidatos.forEach(x=>{x.preseleccionar=motivo!=="nombre"&&!!x.ficha&&!x.yaVinculado&&(!hayEnDepto||x.enSuDepto);});
+    return{credito:c,motivo,candidatos};
+  });
+}
+
 const ORDEN_GRAVEDAD={MORA:3,AL_DIA:2,SIN_CRONOGRAMA:1,CANCELADO:0};
 function coloresEstado(tema){
   return{MORA:tema?.danger||"#B3261E",AL_DIA:tema?.success||"#2E7D32",CANCELADO:tema?.neutral||"#6B7280",SIN_CRONOGRAMA:"#9AA0A6"};
@@ -2683,7 +2840,7 @@ function SelectorParcelaModal({credito,enfocar,soloLectura,onAsignar,onClose}){
     <div style={{background:"#FBFAF4",borderRadius:12,width:1100,maxWidth:"100%",height:"min(760px,100%)",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #E4DFCF"}}>
         <div>
-          <div style={{fontWeight:700,fontSize:15,color:"#23362B"}}>{soloLectura?"Parcela catastral":"Ubicar en parcela catastral"}</div>
+          <div style={{fontWeight:700,fontSize:15,color:"#23362B"}}>{soloLectura?(enfocar?.tipo==="punto"?"Ubicación del productor":"Parcela catastral"):"Ubicar en parcela catastral"}</div>
           <div style={{fontSize:11.5,color:"#8A8470"}}>{credito.productor.nombre} · Expte. {credito.expediente}</div>
         </div>
         <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
@@ -2734,6 +2891,9 @@ function SelectorParcelaModal({credito,enfocar,soloLectura,onAsignar,onClose}){
               stroke="var(--color-success)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" style={{pointerEvents:"none"}}/>)}
             {sel&&<path d={pathParcela(sel)} fillRule="evenodd" fill="#FF8540" fillOpacity={0.45} stroke="#C2410C" strokeWidth={2.4}
               vectorEffect="non-scaling-stroke" style={{pointerEvents:"none"}}/>}
+            {enfocar?.tipo==="punto"&&(()=>{const[x,y]=geoASvg(enfocar.lon,enfocar.lat),r=5*k;
+              return <rect x={x-r*0.8} y={y-r*0.8} width={r*1.6} height={r*1.6} transform={`rotate(45 ${x} ${y})`}
+                fill="#FF8540" stroke="#fff" strokeWidth={1.2*k} style={{pointerEvents:"none"}}/>;})()}
             {CHUBUT_CIUDADES.map((c,i)=><g key={i} style={{pointerEvents:"none"}}>
               <circle cx={c.x} cy={c.y} r={2*k} fill="#14181F" stroke="#fff" strokeWidth={0.6*k}/>
               <text x={c.x+4*k} y={c.y+3*k} fontSize={8*k} fill="#14181F" stroke="#fff" strokeWidth={2*k} paintOrder="stroke">{c.nombre}</text>
@@ -2747,6 +2907,11 @@ function SelectorParcelaModal({credito,enfocar,soloLectura,onAsignar,onClose}){
           {hover&&hover!==sel&&<div style={{position:"absolute",top:44,left:10,maxWidth:"60%",background:"rgba(255,255,255,0.95)",borderRadius:6,padding:"4px 10px",fontSize:11.5,color:"#1A2B4A",boxShadow:"0 2px 6px rgba(0,0,0,0.15)",pointerEvents:"none"}}>
             {describirParcela({...hover,deptoNombre:DEPTO_CODIGO[hover.depto]})}
           </div>}
+          {!sel&&enfocar?.tipo==="punto"&&<div style={{position:"absolute",left:10,right:10,bottom:10,background:"#fff",border:"1px solid #E4DFCF",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#23362B",boxShadow:"0 4px 14px rgba(0,0,0,0.15)"}}>
+            <div style={{fontWeight:700,marginBottom:2}}>Ubicación del padrón RENSPA</div>
+            <div style={{color:"#5B6B63"}}>{describirParcela(enfocar)}</div>
+            <div style={{color:"#9A9482",fontSize:11,marginTop:2}}>Este RENSPA no tiene una parcela en el catastro: el punto es la ubicación declarada en el padrón.</div>
+          </div>}
           {sel&&<div style={{position:"absolute",left:10,right:10,bottom:10,background:"#fff",border:"1px solid #E4DFCF",borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"0 4px 14px rgba(0,0,0,0.15)"}}>
             <div style={{fontSize:12,color:"#23362B",minWidth:0}}>
               <div style={{fontWeight:700,marginBottom:2}}>{soloLectura?"Parcela asignada":"Parcela seleccionada"}</div>
@@ -2759,6 +2924,123 @@ function SelectorParcelaModal({credito,enfocar,soloLectura,onAsignar,onClose}){
         </div>
         </div>
       </div>
+    </div>
+  </div>;
+}
+
+function VincularPadronModal({creditos,onAplicar,onClose}){
+  const[padron,setPadron]=useState(padronSesion);
+  const[leyendo,setLeyendo]=useState(false);
+  const[error,setError]=useState(null);
+  const[marcados,setMarcados]=useState(new Set());
+  const[resultado,setResultado]=useState(null);
+  const parcelario=useParcelario(!!padron);
+  const parcelarioResuelto=parcelario.estado==="listo"||parcelario.estado==="error";
+
+  const propuestas=useMemo(()=>padron&&parcelarioResuelto?proponerVinculos(creditos,padron.registros,parcelario.datos):null,
+    [padron,parcelarioResuelto,parcelario.datos,creditos]);
+  useEffect(()=>{
+    if(propuestas)setMarcados(new Set(propuestas.flatMap(p=>p.candidatos.filter(x=>x.preseleccionar).map(x=>x.clave))));
+  },[propuestas]);
+
+  async function elegirArchivo(e){
+    const f=e.target.files?.[0];e.target.value="";
+    if(!f)return;
+    setLeyendo(true);setError(null);setResultado(null);
+    try{const p=await leerPadronRenspa(f);padronSesion=p;setPadron(p);}
+    catch(err){setError(err.message);}
+    finally{setLeyendo(false);}
+  }
+  function alternar(clave){setMarcados(s=>{const n=new Set(s);n.has(clave)?n.delete(clave):n.add(clave);return n;});}
+  function aplicar(){
+    const cambios=new Map();
+    propuestas.forEach(p=>{
+      const nuevas=p.candidatos.filter(x=>marcados.has(x.clave)&&x.ficha&&!x.yaVinculado).map(x=>x.ficha);
+      if(nuevas.length)cambios.set(p.credito.id,nuevas);
+    });
+    onAplicar(cambios);
+    setResultado({creditos:cambios.size,ubicaciones:[...cambios.values()].reduce((s,v)=>s+v.length,0)});
+  }
+
+  const conCoinc=propuestas?propuestas.filter(p=>p.candidatos.length):[];
+  const sinCoinc=propuestas?propuestas.filter(p=>!p.candidatos.length):[];
+  const nMarcados=propuestas?propuestas.reduce((s,p)=>s+p.candidatos.filter(x=>marcados.has(x.clave)&&x.ficha&&!x.yaVinculado).length,0):0;
+  const motivoTxt={CUIT:"CUIT",DNI:"DNI dentro del CUIT",nombre:"Sólo por nombre: revisar"};
+
+  return <div style={{position:"fixed",inset:0,background:"rgba(35,30,15,0.55)",zIndex:70,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div style={{background:"#FBFAF4",borderRadius:12,width:1100,maxWidth:"100%",maxHeight:"100%",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #E4DFCF"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:15,color:"#23362B"}}>Vincular créditos con el padrón RENSPA</div>
+          <div style={{fontSize:11.5,color:"#8A8470"}}>Cada productor queda en su parcela catastral o, si su RENSPA no tiene parcela, en un punto con la ubicación del padrón.</div>
+        </div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+      </div>
+
+      <div style={{padding:"12px 16px",borderBottom:"1px solid #E4DFCF",display:"flex",gap:14,alignItems:"center",flexWrap:"wrap"}}>
+        <label style={{display:"inline-flex",alignItems:"center",gap:6,background:"var(--color-primary)",color:"#fff",borderRadius:7,padding:"8px 12px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+          <FileText size={14}/>{padron?"Elegir otro archivo":"Elegir el padrón (.xlsx o .csv)"}
+          <input type="file" accept=".xlsx,.csv,.txt" onChange={elegirArchivo} style={{display:"none"}}/>
+        </label>
+        <div style={{fontSize:11.5,color:"#5B6B63",flex:"1 1 300px",lineHeight:1.5}}>
+          {leyendo?"Leyendo el archivo…":padron?<><b>{padron.archivo}</b> · {padron.registros.length.toLocaleString("es-AR")} registros.</>:"Se necesitan las columnas RENSPA, CUIT, Latitud y Longitud."}
+          {" "}El archivo se procesa en este navegador: no se guarda ni se sube. A cada crédito sólo se le copian RENSPA, establecimiento y ubicación.
+        </div>
+      </div>
+      {error&&<div style={{margin:"10px 16px 0",background:"#FBF1EE",border:"1px solid var(--color-danger)",borderRadius:6,padding:"8px 12px",fontSize:12,color:"var(--color-danger)"}}>{error}</div>}
+      {padron&&parcelario.estado==="error"&&<div style={{margin:"10px 16px 0",background:"#FFF8E7",border:"1px solid #E0B44C",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#8A5C00"}}>
+        No se pudo cargar el parcelario ({parcelario.error}): todos los productores se van a ubicar como punto. Verificá que el archivo esté publicado en <code>{PARCELARIO_URL}</code>.
+      </div>}
+      {padron&&!parcelarioResuelto&&<div style={{padding:16,fontSize:12.5,color:"#8A8470"}}>Cargando parcelario…</div>}
+
+      {resultado?<div style={{padding:"28px 16px",textAlign:"center"}}>
+        <CheckCircle2 size={34} color="var(--color-success)"/>
+        <div style={{fontWeight:700,fontSize:15,color:"#23362B",margin:"8px 0 4px"}}>Se vincularon {resultado.ubicaciones} ubicaciones en {resultado.creditos} créditos</div>
+        <div style={{fontSize:12,color:"#8A8470",marginBottom:14}}>Ya aparecen en el mapa del inicio y en la ficha de cada crédito.</div>
+        <Boton onClick={onClose}>Cerrar</Boton>
+      </div>:propuestas&&<>
+        <div style={{padding:"10px 16px",display:"flex",gap:16,flexWrap:"wrap",fontSize:12,color:"#5B6B63"}}>
+          <span><b style={{color:"#23362B"}}>{conCoinc.length}</b> de {propuestas.length} créditos aparecen en el padrón</span>
+          <span><b style={{color:"#23362B"}}>{sinCoinc.length}</b> sin coincidencia</span>
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"0 16px 12px",minHeight:120}}>
+          {conCoinc.length>0&&<table style={{width:"100%",borderCollapse:"collapse",fontSize:12,background:"#fff",border:"1px solid #E4DFCF"}}>
+            <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}>
+              <th style={{...TH,width:28}}></th><th style={TH}>Productor</th><th style={TH}>RENSPA</th><th style={TH}>Establecimiento</th><th style={TH}>Partido</th><th style={TH}>Se ubicará en</th>
+            </tr></thead>
+            <tbody>{conCoinc.map(p=>p.candidatos.map((x,i)=>{
+              const deshab=!x.ficha||x.yaVinculado;
+              return <tr key={x.clave} style={{borderTop:i===0?"2px solid #E4DFCF":"1px solid #F3EFE2",opacity:deshab?0.6:1}}>
+                <td style={TD}><input type="checkbox" disabled={deshab} checked={!deshab&&marcados.has(x.clave)} onChange={()=>alternar(x.clave)}/></td>
+                <td style={TD}>{i===0&&<>
+                  <div style={{fontWeight:700}}>{p.credito.productor.nombre}</div>
+                  <div style={{fontSize:10.5,color:"#8A8470"}}>{p.credito.productor.dni||"sin DNI/CUIT"} · Expte. {p.credito.expediente}</div>
+                  <div style={{fontSize:10.5,fontWeight:600,color:p.motivo==="nombre"?"#B26A00":"var(--color-success)"}}>Coincide por {motivoTxt[p.motivo]}</div>
+                </>}</td>
+                <td style={{...TD,fontFamily:"monospace",whiteSpace:"nowrap"}}>{x.rec.renspa}</td>
+                <td style={TD}>{x.rec.establecimiento||"-"}{p.motivo==="nombre"&&<div style={{fontSize:10.5,color:"#8A8470"}}>Titular: {x.rec.titular}</div>}</td>
+                <td style={TD}>{deptoDesdePartido(x.rec.partido)||"-"}</td>
+                <td style={TD}>{x.yaVinculado?<span style={{color:"var(--color-success)",fontWeight:600}}>Ya vinculado</span>
+                  :x.problema?<span style={{color:"var(--color-danger)"}}>{x.problema}: no se puede ubicar</span>
+                  :x.ficha.tipo==="punto"?<span><b>Punto</b> del padrón <span style={{color:"#8A8470"}}>(el RENSPA no tiene parcela en el catastro)</span></span>
+                  :<span><b>Parcela</b> {[x.ficha.chacra&&`chacra ${x.ficha.chacra}`,`${fmtHa(x.ficha.ha)} ha`].filter(Boolean).join(" · ")}</span>}
+                </td>
+              </tr>;
+            }))}</tbody>
+          </table>}
+          {sinCoinc.length>0&&<details style={{marginTop:10,fontSize:12,color:"#5B6B63"}}>
+            <summary style={{cursor:"pointer",fontWeight:600}}>Créditos sin coincidencia en el padrón ({sinCoinc.length})</summary>
+            <div style={{margin:"6px 0 0 14px",lineHeight:1.6}}>
+              {sinCoinc.map(p=><div key={p.credito.id}>{p.credito.productor.nombre} <span style={{color:"#9A9482"}}>· {p.credito.productor.dni||"sin DNI/CUIT"} · Expte. {p.credito.expediente}</span></div>)}
+              <div style={{color:"#9A9482",marginTop:4}}>Revisá que el DNI/CUIT del crédito esté bien cargado, o ubicalos a mano desde la ficha del crédito.</div>
+            </div>
+          </details>}
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,padding:"10px 16px",borderTop:"1px solid #E4DFCF"}}>
+          <Boton variant="ghost" onClick={onClose}>Cancelar</Boton>
+          <Boton icon={MapPin} disabled={!nMarcados} onClick={aplicar}>Vincular {nMarcados} ubicacion{nMarcados===1?"":"es"}</Boton>
+        </div>
+      </>}
     </div>
   </div>;
 }
@@ -2904,7 +3186,9 @@ function MapaChubutRegional({datos,tots,tema,creditos=[],onAbrirCredito}){
           const r=(ubicSelId===u.id?5.5:4.2)*k;
           return <g key={u.id} transform={`translate(${u.x},${u.y})`} style={{cursor:"pointer"}}
             onClick={()=>{if(!vista.fueArrastre())setUbicSelId(id=>id===u.id?null:u.id);}}>
-            <circle r={r} fill={CE[u.estado]} stroke="#fff" strokeWidth={1.2*k}/>
+            {u.ficha.tipo==="punto"
+              ?<rect x={-r*0.85} y={-r*0.85} width={r*1.7} height={r*1.7} transform="rotate(45)" fill={CE[u.estado]} stroke="#fff" strokeWidth={1.2*k}/>
+              :<circle r={r} fill={CE[u.estado]} stroke="#fff" strokeWidth={1.2*k}/>}
             {u.creditos.length>1&&<text y={r*0.4} textAnchor="middle" fontSize={5.5*k} fontWeight="800" fill="#fff" style={{pointerEvents:"none"}}>{u.creditos.length}</text>}
             <title>{u.creditos.map(c=>c.productor.nombre).join(", ")} — {describirParcela(u.ficha)}</title>
           </g>;
@@ -2912,7 +3196,7 @@ function MapaChubutRegional({datos,tots,tema,creditos=[],onAbrirCredito}){
       </svg>
       {ubicSel&&<div className="no-imprimir" style={{position:"absolute",top:8,left:8,zIndex:6,background:"rgba(255,255,255,0.97)",border:"1px solid #9BBAD4",borderRadius:8,padding:"8px 10px",width:290,maxWidth:"calc(100% - 60px)",fontSize:11.5,color:"#23362B",boxShadow:"0 2px 10px rgba(0,0,0,0.18)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:3}}>
-          <b style={{fontSize:12}}>Parcela catastral</b>
+          <b style={{fontSize:12}}>{ubicSel.ficha.tipo==="punto"?"Ubicación del padrón RENSPA":"Parcela catastral"}</b>
           <button onClick={()=>setUbicSelId(null)} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470",padding:0,display:"flex"}}><X size={14}/></button>
         </div>
         <div style={{color:"#5B6B63",marginBottom:6}}>{describirParcela(ubicSel.ficha)}</div>
@@ -2954,7 +3238,13 @@ function MapaChubutRegional({datos,tots,tema,creditos=[],onAbrirCredito}){
           <div key={e} style={{display:"flex",alignItems:"center",gap:6,fontSize:10.5,color:"#5B6B63",marginBottom:3}}>
             <span style={{width:10,height:10,borderRadius:"50%",background:CE[e],border:"1.5px solid #fff",boxShadow:"0 0 0 1px #C9C2A6"}}/>{l}
           </div>)}
-        <div style={{fontSize:9,color:"#9A9482",marginTop:4,lineHeight:1.4}}>Un número en el marcador indica varios créditos en la misma parcela.</div>
+        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:10.5,color:"#5B6B63",marginTop:6}}>
+          <span style={{width:10,height:10,borderRadius:"50%",background:"#8A8470"}}/>En su parcela catastral
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:10.5,color:"#5B6B63",marginTop:3}}>
+          <span style={{width:8,height:8,margin:"0 1px",background:"#8A8470",transform:"rotate(45deg)"}}/>Punto del padrón RENSPA
+        </div>
+        <div style={{fontSize:9,color:"#9A9482",marginTop:4,lineHeight:1.4}}>Un número en el marcador indica varios créditos en la misma ubicación.</div>
       </div>}
       <div style={{marginTop:10,fontSize:9,color:"#9A9482",lineHeight:1.5}}>Refleja los créditos según los filtros aplicados en la pantalla de inicio.</div>
     </div>
@@ -2974,6 +3264,7 @@ function CrecerApp(){
   const[selected,setSelected]=useState(null);
   const[showSimulador,setShowSimulador]=useState(false);
   const[showEstadoCuenta,setShowEstadoCuenta]=useState(false);
+  const[showPadron,setShowPadron]=useState(false);
   const[busqueda,setBusqueda]=useState("");
   const[filtroEstado,setFiltroEstado]=useState("TODOS");
   const[filtroRegional,setFiltroRegional]=useState("TODAS");
@@ -3023,6 +3314,15 @@ function CrecerApp(){
       return next;
     });
     setSelected(act);
+  },[]);
+  // Agrega ubicaciones a varios créditos de una vez (vinculación con el padrón RENSPA).
+  const agregarUbicaciones=useCallback((cambios)=>{
+    const conNuevas=c=>{
+      const nuevas=(cambios.get(c.id)||[]).filter(f=>!(c.parcelas||[]).some(a=>a.id===f.id));
+      return nuevas.length?{...c,parcelas:[...(c.parcelas||[]),...nuevas]}:c;
+    };
+    setCreditos(prev=>{const next=prev.map(conNuevas);saveJSON("crecer-creditos",next);return next;});
+    setSelected(s=>s&&conNuevas(s));
   },[]);
   const deleteCredito=useCallback((id)=>{
     setCreditos(prev=>{
@@ -3194,7 +3494,8 @@ function CrecerApp(){
             subtitle={
               user.rol==="productor"?"Créditos asociados a tu DNI/CUIT.":user.rol==="viewer_regional"?`Mostrando únicamente créditos de ${REGIONALES_NOMBRE[user.regional]}.`:""
             }/>
-          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+            {isAdmin&&<Boton variant="outline" icon={MapPin} onClick={()=>setShowPadron(true)}>Vincular con padrón RENSPA</Boton>}
             <Boton icon={FileSignature} onClick={()=>setShowEstadoCuenta(true)}>Estado de cuenta — Listado de productores</Boton>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:10}}>
@@ -3248,7 +3549,7 @@ function CrecerApp(){
           <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}>
-                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
+                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th><th style={TH}>Ubicación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
               </tr></thead>
               <tbody>{filtrados.map(c=>{
                 const lc=lineas.find(l=>l.id===c.lineaId),dt=lc&&findDestino(lc,c.destinoId),reg=getRegional(c);
@@ -3256,6 +3557,14 @@ function CrecerApp(){
                   <td style={TD}>{c.expediente}</td><td style={TD}>{c.productor.nombre}</td>
                   <td style={TD}>{dt?.nombre||c.detalleDestino}</td>
                   <td style={TD}>{reg==="Sin asignar"?<span style={{color:"#B0AA94"}}>Sin asignar</span>:reg}</td>
+                  <td style={TD}>{(c.parcelas||[]).length===0?<span style={{color:"#B0AA94"}}>Sin ubicar</span>:
+                    <span title={c.parcelas.map(describirParcela).join("\n")} style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+                      <MapPin size={11} color={c.parcelas[0].tipo==="punto"?"#8A8470":"var(--color-primary)"}/>
+                      {c.parcelas[0].tipo==="punto"?"Punto":c.parcelas[0].chacra?`Chacra ${c.parcelas[0].chacra}`:"Parcela"}
+                      {c.parcelas[0].renspa&&<span style={{fontFamily:"monospace",fontSize:10.5,color:"#5B6B63"}}>{c.parcelas[0].renspa}</span>}
+                      {c.parcelas.length>1&&<span style={{color:"#8A8470"}}>+{c.parcelas.length-1}</span>}
+                    </span>}
+                  </td>
                   <td style={{...TD,fontFamily:"monospace"}}>{money(c.monto)}</td>
                   <td style={TD}>{fmtDate(c.fechaOtorgamiento)}</td>
                   <td style={TD}><EstadoBadge estado={calcularEstado(c)}/></td>
@@ -3263,7 +3572,7 @@ function CrecerApp(){
                   <td style={{...TD,color:"#9A9482"}}><ChevronRight size={15}/></td>
                 </tr>;
               })}
-              {filtrados.length===0&&<tr><td colSpan={9} style={{...TD,textAlign:"center",color:"#9A9482",padding:28}}>No hay créditos que coincidan con los filtros.</td></tr>}
+              {filtrados.length===0&&<tr><td colSpan={10}style={{...TD,textAlign:"center",color:"#9A9482",padding:28}}>No hay créditos que coincidan con los filtros.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -3292,6 +3601,7 @@ function CrecerApp(){
 
     {/* Simulador de cuotas modal */}
     {showSimulador&&<SimuladorCuotas lineas={lineas} onClose={()=>setShowSimulador(false)} onPrint={imprimirHTML}/>}
+    {showPadron&&isAdmin&&<VincularPadronModal creditos={creditos} onAplicar={agregarUbicaciones} onClose={()=>setShowPadron(false)}/>}
     {showEstadoCuenta&&<EstadoCuentaListado creditos={creditosVisibles} lineas={lineas} onClose={()=>setShowEstadoCuenta(false)} onPrint={imprimirHTML} onSelectCredito={c=>{setShowEstadoCuenta(false);setSelected(c);}}/>}
 
     {/* Chat DM flotante — siempre visible */}
