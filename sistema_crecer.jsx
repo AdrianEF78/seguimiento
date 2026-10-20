@@ -3639,6 +3639,15 @@ function MapaChubutRegional({datos,tots,tema,creditos=[],onAbrirCredito}){
 
 // ─── Pagos registrados ────────────────────────────────────────────────────────
 const CONCEPTOS_PAGO={capital:"Capital",interes:"Interés",mora:"Mora",punitorio:"Punitorio"};
+const MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+// Columnas del cuadro de pagos, en el orden pedido por la Dirección.
+const COLUMNAS_PAGOS=[
+  {k:"fecha",t:"Fecha de carga"},{k:"dia",t:"Día",filtro:"lista"},{k:"mes",t:"Mes",filtro:"lista"},{k:"anio",t:"Año",filtro:"lista"},
+  {k:"productor",t:"Productor",filtro:"texto"},{k:"localidad",t:"Localidad",filtro:"lista"},{k:"regionalNombre",t:"Dirección Regional",filtro:"lista"},
+  {k:"expediente",t:"N° Expte.",filtro:"texto"},{k:"contrato",t:"N° contrato",filtro:"texto"},{k:"linea",t:"Línea",filtro:"lista"},
+  {k:"destino",t:"Destino",filtro:"lista"},{k:"fuente",t:"Fuente",filtro:"lista"},{k:"total",t:"Monto"},
+];
+const filtroCol={width:"100%",minWidth:52,border:"1.5px solid #DCD6C2",borderRadius:5,padding:"3px 4px",fontSize:11,fontFamily:"inherit",background:"#fff",color:"#23362B",outline:"none",boxSizing:"border-box"};
 
 // Un pago es lo que se cargó en una misma operación de la liquidación
 // individual: mismo crédito, misma fecha y mismo folio. Al registrarlo se
@@ -3650,6 +3659,10 @@ function extraerPagos(creditos,lineas){
   let sinFecha=0;
   creditos.forEach(c=>{
     const linea=lineas.find(l=>l.id===c.lineaId);
+    const reg=getRegional(c);
+    const datosCredito={linea:linea?.nombre||"",regional:reg,regionalNombre:REGIONALES_NOMBRE[reg]||reg,
+      fuente:String(c.fuenteFinanciamiento||"").trim()||"Sin fuente",localidad:String(c.productor?.ciudad||"").trim(),
+      contrato:String(c.numeroContrato||"").trim(),destino:findDestino(linea,c.destinoId)?.nombre||c.detalleDestino||""};
     (c.cuotas||[]).forEach(q=>{
       const fechado={capital:0,interes:0,mora:0,punitorio:0};
       (q.pagos||[]).forEach(p=>{
@@ -3661,8 +3674,8 @@ function extraerPagos(creditos,lineas){
         const k=`${c.id}|${p.fecha}|${folio}`;
         let op=ops.get(k);
         if(!op){
-          op={id:k,credito:c,fecha:p.fecha,folio,fuente:String(c.fuenteFinanciamiento||"").trim()||"Sin fuente",
-            linea:linea?.nombre||"",regional:getRegional(c),total:0,porConcepto:{capital:0,interes:0,mora:0,punitorio:0},cuotas:[]};
+          op={id:k,credito:c,fecha:p.fecha,dia:p.fecha.slice(8,10),mes:p.fecha.slice(5,7),anio:p.fecha.slice(0,4),folio,...datosCredito,
+            total:0,porConcepto:{capital:0,interes:0,mora:0,punitorio:0},cuotas:[]};
           ops.set(k,op);
         }
         op.total=r2(op.total+monto);
@@ -3697,30 +3710,40 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
   const[pestana,setPestana]=useState("registro");
   const[desde,setDesde]=useState("");
   const[hasta,setHasta]=useState("");
-  const[fuente,setFuente]=useState("TODAS");
-  const[linea,setLinea]=useState("TODAS");
-  const[regional,setRegional]=useState("TODAS");
   const[texto,setTexto]=useState("");
+  // Filtro de cada columna del cuadro: "" = sin filtrar.
+  const[fc,setFc]=useState({});
+  const setFiltro=(k,v)=>setFc(f=>({...f,[k]:v}));
   const[montoBus,setMontoBus]=useState("");
   const[fechaBus,setFechaBus]=useState("");
   const[margenDias,setMargenDias]=useState("3");
   const[tolerancia,setTolerancia]=useState("abs");
 
-  const fuentes=useMemo(()=>[...new Set(operaciones.map(o=>o.fuente))].sort((a,b)=>a.localeCompare(b,"es")),[operaciones]);
-  const nombresLinea=useMemo(()=>[...new Set(operaciones.map(o=>o.linea).filter(Boolean))].sort(),[operaciones]);
+  // Valores posibles de cada columna con lista desplegable.
+  const opcionesColumna=useMemo(()=>{
+    const de=k=>[...new Set(operaciones.map(o=>o[k]).filter(Boolean))];
+    const alfa=a=>a.sort((x,y)=>x.localeCompare(y,"es"));
+    return{dia:de("dia").sort(),mes:de("mes").sort(),anio:de("anio").sort().reverse(),localidad:alfa(de("localidad")),
+      regionalNombre:alfa(de("regionalNombre")),linea:alfa(de("linea")),destino:alfa(de("destino")),fuente:alfa(de("fuente"))};
+  },[operaciones]);
 
   const filtradas=useMemo(()=>{
     const q=normalizarTxt(texto).trim();
+    const txt=k=>normalizarTxt(fc[k]||"").trim();
+    const qProd=txt("productor"),qExp=txt("expediente"),qCon=txt("contrato");
     return operaciones.filter(o=>{
       if(desde&&o.fecha<desde)return false;
       if(hasta&&o.fecha>hasta)return false;
-      if(fuente!=="TODAS"&&o.fuente!==fuente)return false;
-      if(linea!=="TODAS"&&o.linea!==linea)return false;
-      if(regional!=="TODAS"&&o.regional!==regional)return false;
-      if(q){const c=o.credito;if(!normalizarTxt(`${c.productor.nombre} ${c.productor.dni} ${c.expediente} ${o.folio}`).includes(q))return false;}
+      for(const k of Object.keys(opcionesColumna))if(fc[k]&&o[k]!==fc[k])return false;
+      const c=o.credito;
+      if(qProd&&!normalizarTxt(c.productor.nombre).includes(qProd))return false;
+      if(qExp&&!normalizarTxt(c.expediente).includes(qExp))return false;
+      if(qCon&&!normalizarTxt(o.contrato).includes(qCon))return false;
+      if(q&&!normalizarTxt(`${c.productor.nombre} ${c.productor.dni} ${c.expediente} ${o.folio}`).includes(q))return false;
       return true;
     });
-  },[operaciones,desde,hasta,fuente,linea,regional,texto]);
+  },[operaciones,desde,hasta,fc,texto,opcionesColumna]);
+  const hayFiltros=!!(desde||hasta||texto||Object.values(fc).some(Boolean));
 
   const est=useMemo(()=>{
     const t={total:0,capital:0,interes:0,mora:0,punitorio:0},porFuente=new Map(),porMes=new Map();
@@ -3759,10 +3782,14 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
     return out.sort((a,b)=>(a.dMonto>1)-(b.dMonto>1)||a.dDias-b.dDias||a.dMonto-b.dMonto).slice(0,100);
   },[operaciones,montoN,fechaBus,margenDias,tolerancia]);
 
+  // Mismas columnas que el cuadro, en el mismo orden; al final, el desglose
+  // del pago para quien necesite cruzarlo con contabilidad.
   function exportarCsv(){
-    const filas=[["Fecha","Productor","DNI/CUIT","Expediente","Fuente de financiamiento","Línea","Regional","Capital","Interés","Mora","Punitorio","Total","Folio","Cuotas"]];
-    filtradas.forEach(o=>filas.push([fmtDate(o.fecha),o.credito.productor.nombre,o.credito.productor.dni,o.credito.expediente,o.fuente,o.linea,o.regional,
-      montoCsv(o.porConcepto.capital),montoCsv(o.porConcepto.interes),montoCsv(o.porConcepto.mora),montoCsv(o.porConcepto.punitorio),montoCsv(o.total),o.folio,o.cuotas.join(" ")]));
+    const filas=[["Fecha de carga","Día","Mes","Año","Productor","Localidad","Dirección Regional","N° Expte.","N° contrato","Línea","Destino","Fuente","Monto",
+      "DNI/CUIT","Capital","Interés","Mora","Punitorio","Folio","Cuotas"]];
+    filtradas.forEach(o=>filas.push([fmtDate(o.fecha),Number(o.dia),Number(o.mes),o.anio,o.credito.productor.nombre,o.localidad,o.regionalNombre,o.credito.expediente,
+      o.contrato,o.linea,o.destino,o.fuente,montoCsv(o.total),
+      o.credito.productor.dni,montoCsv(o.porConcepto.capital),montoCsv(o.porConcepto.interes),montoCsv(o.porConcepto.mora),montoCsv(o.porConcepto.punitorio),o.folio,o.cuotas.join(" ")]));
     const csv="﻿"+filas.map(f=>f.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
     const a=document.createElement("a");
     a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
@@ -3772,15 +3799,18 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
   }
   function imprimir(){
     const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-    const filtrosTxt=[desde&&`desde ${fmtDate(desde)}`,hasta&&`hasta ${fmtDate(hasta)}`,fuente!=="TODAS"&&`fuente: ${fuente}`,linea!=="TODAS"&&`línea: ${linea}`,regional!=="TODAS"&&`regional: ${regional}`,texto&&`búsqueda: ${texto}`].filter(Boolean).join(" · ")||"todos los pagos";
+    const nombreFiltro={dia:"día",mes:"mes",anio:"año",localidad:"localidad",regionalNombre:"regional",linea:"línea",destino:"destino",fuente:"fuente",productor:"productor",expediente:"expte.",contrato:"contrato"};
+    const filtrosTxt=[desde&&`desde ${fmtDate(desde)}`,hasta&&`hasta ${fmtDate(hasta)}`,
+      ...Object.entries(fc).filter(([,v])=>v).map(([k,v])=>`${nombreFiltro[k]}: ${k==="mes"?MESES[Number(v)-1]:v}`),
+      texto&&`búsqueda: ${texto}`].filter(Boolean).join(" · ")||"todos los pagos";
     onPrint(`<h2 style="margin:0 0 4px">Pagos registrados</h2>
       <div style="font-size:10pt;color:#555;margin-bottom:10px">Generado el ${fmtDate(todayStr())} · ${esc(filtrosTxt)}</div>
       <p><b>Total cobrado: ${money(est.total)}</b> en ${filtradas.length} pagos · Capital ${money(est.capital)} · Interés ${money(est.interes)} · Mora ${money(est.mora)} · Punitorio ${money(est.punitorio)}</p>
       <table><thead><tr><th>Fuente de financiamiento</th><th>Pagos</th><th>Capital</th><th>Interés</th><th>Mora + punit.</th><th>Total</th></tr></thead><tbody>
       ${est.porFuente.map(f=>`<tr><td>${esc(f.fuente)}</td><td>${f.n}</td><td>${money(f.capital)}</td><td>${money(f.interes)}</td><td>${money(f.moraPun)}</td><td><b>${money(f.total)}</b></td></tr>`).join("")}
       </tbody></table>
-      <table><thead><tr><th>Fecha</th><th>Productor</th><th>Expte.</th><th>Fuente</th><th>Detalle</th><th>Folio</th><th>Total</th></tr></thead><tbody>
-      ${filtradas.map(o=>`<tr><td>${fmtDate(o.fecha)}</td><td>${esc(o.credito.productor.nombre)}<br/><small>${esc(o.credito.productor.dni)}</small></td><td>${esc(o.credito.expediente)}</td><td>${esc(o.fuente)}</td><td>${esc(detalleConceptos(o))}</td><td>${esc(o.folio)}</td><td><b>${money(o.total)}</b></td></tr>`).join("")}
+      <table style="font-size:8.5pt"><thead><tr><th>Fecha de carga</th><th>Día</th><th>Mes</th><th>Año</th><th>Productor</th><th>Localidad</th><th>Dirección Regional</th><th>N° Expte.</th><th>N° contrato</th><th>Línea</th><th>Destino</th><th>Fuente</th><th>Monto</th></tr></thead><tbody>
+      ${filtradas.map(o=>`<tr><td>${fmtDate(o.fecha)}</td><td>${Number(o.dia)}</td><td>${MESES[Number(o.mes)-1]}</td><td>${o.anio}</td><td>${esc(o.credito.productor.nombre)}</td><td>${esc(o.localidad)}</td><td>${esc(o.regionalNombre)}</td><td>${esc(o.credito.expediente)}</td><td>${esc(o.contrato)}</td><td>${esc(o.linea)}</td><td>${esc(o.destino)}</td><td>${esc(o.fuente)}</td><td style="white-space:nowrap"><b>${money(o.total)}</b></td></tr>`).join("")}
       </tbody></table>`);
   }
 
@@ -3819,11 +3849,9 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
           <label style={{fontSize:11,color:"#5B6B63"}}>Desde<input type="date" min="2000-01-01" style={{...sel,display:"block",width:140}} value={desde} onChange={e=>setDesde(e.target.value)}/></label>
           <label style={{fontSize:11,color:"#5B6B63"}}>Hasta<input type="date" min="2000-01-01" style={{...sel,display:"block",width:140}} value={hasta} onChange={e=>setHasta(e.target.value)}/></label>
-          <select style={{...sel,width:200}} value={fuente} onChange={e=>setFuente(e.target.value)}><option value="TODAS">Todas las fuentes</option>{fuentes.map(f=><option key={f} value={f}>{f}</option>)}</select>
-          <select style={{...sel,width:200}} value={linea} onChange={e=>setLinea(e.target.value)}><option value="TODAS">Todas las líneas</option>{nombresLinea.map(l=><option key={l} value={l}>{l}</option>)}</select>
-          <select style={{...sel,width:170}} value={regional} onChange={e=>setRegional(e.target.value)}><option value="TODAS">Todas las regionales</option>{[...REGIONALES_LISTA,"Sin asignar"].map(r=><option key={r} value={r}>{REGIONALES_NOMBRE[r]||r}</option>)}</select>
-          <div style={{position:"relative",flex:"1 1 180px"}}><Search size={13} style={{position:"absolute",left:9,top:9,color:"#9A9482"}}/><input style={{...sel,paddingLeft:28}} placeholder="Productor, DNI, expediente o folio" value={texto} onChange={e=>setTexto(e.target.value)}/></div>
+          <div style={{position:"relative",flex:"1 1 220px"}}><Search size={13} style={{position:"absolute",left:9,top:9,color:"#9A9482"}}/><input style={{...sel,paddingLeft:28}} placeholder="Buscar por productor, DNI, expediente o folio" value={texto} onChange={e=>setTexto(e.target.value)}/></div>
           <div style={{display:"flex",gap:6}}>
+            {hayFiltros&&<Boton size="sm" variant="ghost" icon={X} onClick={()=>{setDesde("");setHasta("");setTexto("");setFc({});}}>Quitar filtros</Boton>}
             <Boton size="sm" variant="outline" icon={FileText} onClick={exportarCsv} disabled={!filtradas.length}>Exportar a Excel</Boton>
             <Boton size="sm" variant="outline" icon={Printer} onClick={imprimir} disabled={!filtradas.length}>Imprimir</Boton>
           </div>
@@ -3845,7 +3873,7 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
             <div style={{fontWeight:700,fontSize:12.5,color:"#23362B",padding:"8px 12px"}}>Cobrado por fuente de financiamiento</div>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
               <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}><th style={TH}>Fuente</th><th style={TH}>Pagos</th><th style={{...TH,textAlign:"right"}}>Capital</th><th style={{...TH,textAlign:"right"}}>Interés</th><th style={{...TH,textAlign:"right"}}>Mora + punit.</th><th style={{...TH,textAlign:"right"}}>Total</th></tr></thead>
-              <tbody>{est.porFuente.map(f=><tr key={f.fuente} style={{borderTop:"1px solid #EEE9D9",cursor:"pointer"}} title="Filtrar por esta fuente" onClick={()=>setFuente(f.fuente)}>
+              <tbody>{est.porFuente.map(f=><tr key={f.fuente} style={{borderTop:"1px solid #EEE9D9",cursor:"pointer"}} title="Filtrar por esta fuente" onClick={()=>setFiltro("fuente",f.fuente)}>
                 <td style={{...TD,fontWeight:600}}>{f.fuente}</td><td style={TD}>{f.n}</td>
                 {[f.capital,f.interes,f.moraPun].map((v,i)=><td key={i} style={{...TD,fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{money(v)}</td>)}
                 <td style={{...TD,fontFamily:"monospace",textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{money(f.total)}</td>
@@ -3864,13 +3892,48 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
           </div>
         </div>}
 
+        {/* Cuadro de pagos con un filtro debajo de cada título, como en una planilla. */}
         <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-            {cabecera()}
+          <table style={{width:"100%",minWidth:1380,borderCollapse:"collapse",fontSize:11.5}}>
+            <thead>
+              <tr style={{background:"#F0ECDD",textAlign:"left"}}>
+                {COLUMNAS_PAGOS.map(c=><th key={c.k} style={{...TH,textAlign:c.k==="total"?"right":"left"}}>{c.t}</th>)}<th style={TH}></th>
+              </tr>
+              <tr className="no-imprimir" style={{background:"#F7F4EA"}}>
+                {COLUMNAS_PAGOS.map(c=><th key={c.k} style={{padding:"3px 4px",fontWeight:400}}>
+                  {c.filtro==="lista"?<select style={{...filtroCol,borderColor:fc[c.k]?"var(--color-primary)":"#DCD6C2"}} value={fc[c.k]||""} onChange={e=>setFiltro(c.k,e.target.value)}>
+                    <option value="">Todos</option>
+                    {opcionesColumna[c.k].map(v=><option key={v} value={v}>{c.k==="mes"?MESES[Number(v)-1]:c.k==="dia"?Number(v):v}</option>)}
+                  </select>
+                  :c.filtro==="texto"?<input style={{...filtroCol,borderColor:fc[c.k]?"var(--color-primary)":"#DCD6C2"}} placeholder="Filtrar…" value={fc[c.k]||""} onChange={e=>setFiltro(c.k,e.target.value)}/>
+                  :null}
+                </th>)}<th/>
+              </tr>
+            </thead>
             <tbody>
-              {filtradas.slice(0,MAX_FILAS).map(o=>filaPago(o))}
-              {filtradas.length===0&&<tr><td colSpan={7} style={{...TD,textAlign:"center",color:"#9A9482",padding:24}}>{operaciones.length?"No hay pagos que coincidan con los filtros.":"Todavía no hay pagos registrados en las liquidaciones de los créditos."}</td></tr>}
+              {filtradas.slice(0,MAX_FILAS).map(o=><tr key={o.id} style={{borderTop:"1px solid #EEE9D9"}}>
+                <td style={{...TD,whiteSpace:"nowrap"}}>{fmtDate(o.fecha)}</td>
+                <td style={TD}>{Number(o.dia)}</td>
+                <td style={TD}>{MESES[Number(o.mes)-1]}</td>
+                <td style={TD}>{o.anio}</td>
+                <td style={{...TD,fontWeight:600}}>{o.credito.productor.nombre}</td>
+                <td style={TD}>{o.localidad||<span style={{color:"#B0AA94"}}>-</span>}</td>
+                <td style={TD}>{o.regionalNombre}</td>
+                <td style={{...TD,whiteSpace:"nowrap"}}>{o.credito.expediente}</td>
+                <td style={TD}>{o.contrato||<span style={{color:"#B0AA94"}}>-</span>}</td>
+                <td style={TD}>{o.linea}</td>
+                <td style={TD}>{o.destino||<span style={{color:"#B0AA94"}}>-</span>}</td>
+                <td style={TD}>{o.fuente}</td>
+                <td style={{...TD,fontFamily:"monospace",fontWeight:700,whiteSpace:"nowrap",textAlign:"right"}}
+                  title={`${detalleConceptos(o)}${o.folio?` · ${o.folio}`:""} · ${o.cuotas.join(", ")}`}>{money(o.total)}</td>
+                <td style={TD}><button onClick={()=>onSelectCredito(o.credito)} style={{...iBtn,fontSize:11,whiteSpace:"nowrap"}}>Abrir</button></td>
+              </tr>)}
+              {filtradas.length===0&&<tr><td colSpan={COLUMNAS_PAGOS.length+1} style={{...TD,textAlign:"center",color:"#9A9482",padding:24}}>{operaciones.length?"No hay pagos que coincidan con los filtros.":"Todavía no hay pagos registrados en las liquidaciones de los créditos."}</td></tr>}
             </tbody>
+            {filtradas.length>0&&<tfoot><tr style={{borderTop:"2px solid #DDD",background:"#F0ECDD",fontWeight:700}}>
+              <td style={TD} colSpan={COLUMNAS_PAGOS.length-1}>TOTAL · {filtradas.length} pago{filtradas.length===1?"":"s"}</td>
+              <td style={{...TD,fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{money(est.total)}</td><td style={TD}/>
+            </tr></tfoot>}
           </table>
           {filtradas.length>MAX_FILAS&&<div style={{padding:"8px 12px",fontSize:11.5,color:"#8A8470"}}>Se muestran los {MAX_FILAS} pagos más recientes de {filtradas.length}. Afiná los filtros, o usá "Exportar a Excel" para tenerlos todos.</div>}
         </div>
