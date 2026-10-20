@@ -3124,21 +3124,37 @@ function ubicacionDesdePadron(rec,parcelario){
     lat:Math.round(rec.lat*1e5)/1e5,lon:Math.round(rec.lon*1e5)/1e5,origen:"padron",asignada:todayStr()}};
 }
 
-// Busca a cada productor en el padrón por CUIT; si el crédito tiene un DNI,
-// por los 8 dígitos centrales del CUIT; y si no aparece, por nombre (esas
-// coincidencias quedan sin marcar para revisarlas a mano).
+// El RENSPA se compara sólo por sus dígitos: "06.001.0.00001/01" y
+// "06001000000101" son el mismo. Sin el sufijo "/01" quedan 11 dígitos, que
+// identifican al establecimiento con todas sus subdivisiones.
+const claveRenspa=s=>String(s||"").replace(/\D/g,"");
+
+// Busca a cada productor en el padrón, de lo más preciso a lo menos preciso:
+// 1) por el N° de RENSPA cargado en el crédito, que identifica el
+//    establecimiento exacto aunque el titular tenga varios;
+// 2) por CUIT; 3) si el crédito tiene un DNI, por los 8 dígitos centrales
+//    del CUIT; 4) por nombre (esas quedan sin marcar para revisarlas).
 function proponerVinculos(creditos,registros,parcelario){
-  const porCuit=new Map(),porDni=new Map(),porNombre=new Map();
+  const porRenspa=new Map(),porRenspaBase=new Map(),porCuit=new Map(),porDni=new Map(),porNombre=new Map();
   const agregar=(m,k,r)=>{if(!k)return;if(!m.has(k))m.set(k,[]);m.get(k).push(r);};
   registros.forEach(r=>{
+    const kr=claveRenspa(r.renspa);
+    agregar(porRenspa,kr,r);
+    if(kr.length>11)agregar(porRenspaBase,kr.slice(0,11),r);
     agregar(porCuit,r.cuit,r);
     if(r.cuit.length===11)agregar(porDni,r.cuit.slice(2,10),r);
     agregar(porNombre,claveNombre(r.titular),r);
   });
+  const mismoTitular=(cuit,d)=>d.length===11?cuit===d:cuit.length===11&&cuit.slice(2,10)===d.padStart(8,"0");
   return creditos.map(c=>{
     const d=String(c.productor?.dni||"").replace(/\D/g,"");
+    // El campo admite más de un RENSPA separados por coma, punto y coma o espacio.
+    const renspasCred=String(c.numeroRenspa||"").split(/[,;\s]+/).map(claveRenspa).filter(k=>k.length>=11);
+    const porSuRenspa=[...new Set(renspasCred.flatMap(k=>porRenspa.get(k)||(k.length===11?porRenspaBase.get(k):null)||[]))];
+    const renspaNoEncontrado=renspasCred.length>0&&!porSuRenspa.length?String(c.numeroRenspa).trim():null;
     let motivo=null,recs=[];
-    if(d.length===11&&porCuit.has(d)){motivo="CUIT";recs=porCuit.get(d);}
+    if(porSuRenspa.length){motivo="RENSPA";recs=porSuRenspa;}
+    else if(d.length===11&&porCuit.has(d)){motivo="CUIT";recs=porCuit.get(d);}
     else if(d.length>=7&&d.length<=8&&porDni.has(d.padStart(8,"0"))){motivo="DNI";recs=porDni.get(d.padStart(8,"0"));}
     else{const k=claveNombre(c.productor?.nombre);if(k&&porNombre.has(k)){motivo="nombre";recs=porNombre.get(k);}}
     const actuales=c.parcelas||[];
@@ -3146,12 +3162,16 @@ function proponerVinculos(creditos,registros,parcelario){
     const candidatos=recs.map(rec=>{
       const u=ubicacionDesdePadron(rec,parcelario);
       const yaVinculado=actuales.some(a=>a.renspa===rec.renspa||(u.ficha&&a.id===u.ficha.id));
-      return{clave:`${c.id}|${rec.renspa}`,rec,...u,yaVinculado,enSuDepto:!!deptoCred&&normalizarTxt(deptoDesdePartido(rec.partido))===deptoCred};
+      // Un RENSPA cargado con un error de tipeo puede ser de otro productor.
+      const titularDistinto=motivo==="RENSPA"&&d.length>=7&&!!rec.cuit&&!mismoTitular(rec.cuit,d);
+      return{clave:`${c.id}|${rec.renspa}`,rec,...u,yaVinculado,titularDistinto,enSuDepto:!!deptoCred&&normalizarTxt(deptoDesdePartido(rec.partido))===deptoCred};
     });
-    // Con varios RENSPA del mismo titular se proponen los del departamento del crédito.
+    // Con varios RENSPA del mismo titular (búsqueda por CUIT o DNI) se proponen los del departamento del crédito.
     const hayEnDepto=candidatos.some(x=>x.enSuDepto);
-    candidatos.forEach(x=>{x.preseleccionar=motivo!=="nombre"&&!!x.ficha&&!x.yaVinculado&&(!hayEnDepto||x.enSuDepto);});
-    return{credito:c,motivo,candidatos};
+    candidatos.forEach(x=>{
+      x.preseleccionar=motivo!=="nombre"&&!!x.ficha&&!x.yaVinculado&&!x.titularDistinto&&(motivo==="RENSPA"||!hayEnDepto||x.enSuDepto);
+    });
+    return{credito:c,motivo,candidatos,renspaNoEncontrado};
   });
 }
 
@@ -3324,7 +3344,8 @@ function VincularPadronModal({creditos,onAplicar,onClose}){
   const conCoinc=propuestas?propuestas.filter(p=>p.candidatos.length):[];
   const sinCoinc=propuestas?propuestas.filter(p=>!p.candidatos.length):[];
   const nMarcados=propuestas?propuestas.reduce((s,p)=>s+p.candidatos.filter(x=>marcados.has(x.clave)&&x.ficha&&!x.yaVinculado).length,0):0;
-  const motivoTxt={CUIT:"CUIT",DNI:"DNI dentro del CUIT",nombre:"Sólo por nombre: revisar"};
+  const motivoTxt={RENSPA:"N° de RENSPA del crédito",CUIT:"CUIT",DNI:"DNI dentro del CUIT",nombre:"Sólo por nombre: revisar"};
+  const avisoRenspa=p=>p.renspaNoEncontrado&&<div style={{fontSize:10.5,fontWeight:600,color:"#B26A00"}}>El RENSPA cargado ({p.renspaNoEncontrado}) no figura en el padrón: se buscó por {p.motivo?motivoTxt[p.motivo]:"DNI/CUIT y nombre"}.</div>;
 
   return <div style={{position:"fixed",inset:0,background:"rgba(35,30,15,0.55)",zIndex:70,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div style={{background:"#FBFAF4",borderRadius:12,width:1100,maxWidth:"100%",maxHeight:"100%",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
@@ -3375,9 +3396,14 @@ function VincularPadronModal({creditos,onAplicar,onClose}){
                   <div style={{fontWeight:700}}>{p.credito.productor.nombre}</div>
                   <div style={{fontSize:10.5,color:"#8A8470"}}>{p.credito.productor.dni||"sin DNI/CUIT"} · Expte. {p.credito.expediente}</div>
                   <div style={{fontSize:10.5,fontWeight:600,color:p.motivo==="nombre"?"#B26A00":"var(--color-success)"}}>Coincide por {motivoTxt[p.motivo]}</div>
+                  {avisoRenspa(p)}
                 </>}</td>
                 <td style={{...TD,fontFamily:"monospace",whiteSpace:"nowrap"}}>{x.rec.renspa}</td>
-                <td style={TD}>{x.rec.establecimiento||"-"}{p.motivo==="nombre"&&<div style={{fontSize:10.5,color:"#8A8470"}}>Titular: {x.rec.titular}</div>}</td>
+                <td style={TD}>{x.rec.establecimiento||"-"}
+                  {(p.motivo==="nombre"||x.titularDistinto)&&<div style={{fontSize:10.5,color:x.titularDistinto?"#B26A00":"#8A8470",fontWeight:x.titularDistinto?600:400}}>
+                    {x.titularDistinto?`En el padrón figura a nombre de ${x.rec.titular||"otro titular"}: revisar el RENSPA o el DNI/CUIT del crédito.`:`Titular: ${x.rec.titular}`}
+                  </div>}
+                </td>
                 <td style={TD}>{deptoDesdePartido(x.rec.partido)||"-"}</td>
                 <td style={TD}>{x.yaVinculado?<span style={{color:"var(--color-success)",fontWeight:600}}>Ya vinculado</span>
                   :x.problema?<span style={{color:"var(--color-danger)"}}>{x.problema}: no se puede ubicar</span>
@@ -3390,8 +3416,8 @@ function VincularPadronModal({creditos,onAplicar,onClose}){
           {sinCoinc.length>0&&<details style={{marginTop:10,fontSize:12,color:"#5B6B63"}}>
             <summary style={{cursor:"pointer",fontWeight:600}}>Créditos sin coincidencia en el padrón ({sinCoinc.length})</summary>
             <div style={{margin:"6px 0 0 14px",lineHeight:1.6}}>
-              {sinCoinc.map(p=><div key={p.credito.id}>{p.credito.productor.nombre} <span style={{color:"#9A9482"}}>· {p.credito.productor.dni||"sin DNI/CUIT"} · Expte. {p.credito.expediente}</span></div>)}
-              <div style={{color:"#9A9482",marginTop:4}}>Revisá que el DNI/CUIT del crédito esté bien cargado, o ubicalos a mano desde la ficha del crédito.</div>
+              {sinCoinc.map(p=><div key={p.credito.id}>{p.credito.productor.nombre} <span style={{color:"#9A9482"}}>· {p.credito.productor.dni||"sin DNI/CUIT"} · Expte. {p.credito.expediente}</span>{avisoRenspa(p)}</div>)}
+              <div style={{color:"#9A9482",marginTop:4}}>Revisá que el N° de RENSPA y el DNI/CUIT del crédito estén bien cargados, o ubicalos a mano desde la ficha del crédito.</div>
             </div>
           </details>}
         </div>
@@ -3920,7 +3946,7 @@ function CrecerApp(){
           <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}>
-                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th>{user.rol!=="productor"&&<th style={TH}>Ciudad</th>}<th style={TH}>Situación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
+                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th>{user.rol!=="productor"&&<th style={TH}>Ciudad</th>}{user.rol!=="productor"&&<th style={TH}>Ubicación</th>}<th style={TH}>Situación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
               </tr></thead>
               <tbody>{filtrados.map(c=>{
                 const lc=lineas.find(l=>l.id===c.lineaId),dt=lc&&findDestino(lc,c.destinoId),reg=getRegional(c);
@@ -3929,6 +3955,14 @@ function CrecerApp(){
                   <td style={TD}>{dt?.nombre||c.detalleDestino}</td>
                   <td style={TD}>{reg==="Sin asignar"?<span style={{color:"#B0AA94"}}>Sin asignar</span>:reg}</td>
                   {user.rol!=="productor"&&<td style={TD}>{ciudadDe(c)||<span style={{color:"#B0AA94"}}>-</span>}</td>}
+                  {user.rol!=="productor"&&<td style={TD}>{(c.parcelas||[]).length===0?<span style={{color:"#B0AA94"}}>Sin ubicar</span>:
+                    <span title={c.parcelas.map(describirParcela).join("\n")} style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+                      <MapPin size={11} color={c.parcelas[0].tipo==="punto"?"#8A8470":"var(--color-primary)"}/>
+                      {c.parcelas[0].tipo==="punto"?"Punto":c.parcelas[0].chacra?`Chacra ${c.parcelas[0].chacra}`:"Parcela"}
+                      {c.parcelas[0].renspa&&<span style={{fontFamily:"monospace",fontSize:10.5,color:"#5B6B63"}}>{c.parcelas[0].renspa}</span>}
+                      {c.parcelas.length>1&&<span style={{color:"#8A8470"}}>+{c.parcelas.length-1}</span>}
+                    </span>}
+                  </td>}
                   <td style={TD}><SituacionBadge valor={c.situacion} corto/></td>
                   <td style={{...TD,fontFamily:"monospace"}}>{money(c.monto)}</td>
                   <td style={TD}>{fmtDate(c.fechaOtorgamiento)}</td>
@@ -3937,7 +3971,7 @@ function CrecerApp(){
                   <td style={{...TD,color:"#9A9482"}}><ChevronRight size={15}/></td>
                 </tr>;
               })}
-              {filtrados.length===0&&<tr><td colSpan={user.rol==="productor"?10:11} style={{...TD,textAlign:"center",color:"#9A9482",padding:28}}>No hay créditos que coincidan con los filtros.</td></tr>}
+              {filtrados.length===0&&<tr><td colSpan={user.rol==="productor"?10:12} style={{...TD,textAlign:"center",color:"#9A9482",padding:28}}>No hay créditos que coincidan con los filtros.</td></tr>}
               </tbody>
             </table>
           </div>
