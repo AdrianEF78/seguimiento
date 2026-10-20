@@ -3637,6 +3637,276 @@ function MapaChubutRegional({datos,tots,tema,creditos=[],onAbrirCredito}){
 }
 
 
+// ─── Pagos registrados ────────────────────────────────────────────────────────
+const CONCEPTOS_PAGO={capital:"Capital",interes:"Interés",mora:"Mora",punitorio:"Punitorio"};
+
+// Un pago es lo que se cargó en una misma operación de la liquidación
+// individual: mismo crédito, misma fecha y mismo folio. Al registrarlo se
+// reparte entre capital, interés, mora y punitorio (a veces de varias
+// cuotas), pero el productor hizo un solo depósito por el total, que es el
+// monto con el que después llegan a preguntar de quién es.
+function extraerPagos(creditos,lineas){
+  const ops=new Map();
+  let sinFecha=0;
+  creditos.forEach(c=>{
+    const linea=lineas.find(l=>l.id===c.lineaId);
+    (c.cuotas||[]).forEach(q=>{
+      const fechado={capital:0,interes:0,mora:0,punitorio:0};
+      (q.pagos||[]).forEach(p=>{
+        const concepto=CONCEPTOS_PAGO[p.tipo]?p.tipo:q.tipo;
+        const monto=r2(p.monto||0);
+        if(!p.fecha||!monto)return;
+        fechado[concepto]+=monto;
+        const folio=String(p.folio||"").trim();
+        const k=`${c.id}|${p.fecha}|${folio}`;
+        let op=ops.get(k);
+        if(!op){
+          op={id:k,credito:c,fecha:p.fecha,folio,fuente:String(c.fuenteFinanciamiento||"").trim()||"Sin fuente",
+            linea:linea?.nombre||"",regional:getRegional(c),total:0,porConcepto:{capital:0,interes:0,mora:0,punitorio:0},cuotas:[]};
+          ops.set(k,op);
+        }
+        op.total=r2(op.total+monto);
+        op.porConcepto[concepto]=r2(op.porConcepto[concepto]+monto);
+        const et=`${q.tipo==="capital"?"Cap.":"Int."} ${q.numero}`;
+        if(!op.cuotas.includes(et))op.cuotas.push(et);
+      });
+      // Cargas viejas o importadas pueden tener importes cobrados sin el
+      // detalle de la fecha: no entran en el registro, pero se informan.
+      const ci=q.tipo==="capital"?"capital":"interes";
+      sinFecha+=Math.max(0,(q.montoPagado||0)-fechado[ci])+Math.max(0,(q.moraPagada||0)-fechado.mora)+Math.max(0,(q.punitorioPagado||0)-fechado.punitorio);
+    });
+  });
+  const operaciones=[...ops.values()].sort((a,b)=>b.fecha.localeCompare(a.fecha)||a.credito.productor.nombre.localeCompare(b.credito.productor.nombre));
+  return{operaciones,sinFecha:r2(sinFecha)};
+}
+
+// Acepta "1.234.567,89", "1234567,89" o "1234567.89".
+function parseMonto(s){
+  let t=String(s||"").replace(/[\s$]/g,"");
+  if(!t)return null;
+  if(t.includes(","))t=t.replace(/\./g,"").replace(",",".");
+  else if(/^\d{1,3}(\.\d{3})+$/.test(t))t=t.replace(/\./g,"");
+  const n=parseFloat(t);
+  return Number.isFinite(n)?n:null;
+}
+const montoCsv=n=>(Number(n)||0).toFixed(2).replace(".",",");
+const detalleConceptos=op=>Object.entries(op.porConcepto).filter(([,v])=>v>0).map(([k,v])=>`${CONCEPTOS_PAGO[k]} ${money(v)}`).join(" · ");
+
+function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredito}){
+  const{operaciones,sinFecha}=useMemo(()=>extraerPagos(creditos,lineas),[creditos,lineas]);
+  const[pestana,setPestana]=useState("registro");
+  const[desde,setDesde]=useState("");
+  const[hasta,setHasta]=useState("");
+  const[fuente,setFuente]=useState("TODAS");
+  const[linea,setLinea]=useState("TODAS");
+  const[regional,setRegional]=useState("TODAS");
+  const[texto,setTexto]=useState("");
+  const[montoBus,setMontoBus]=useState("");
+  const[fechaBus,setFechaBus]=useState("");
+  const[margenDias,setMargenDias]=useState("3");
+  const[tolerancia,setTolerancia]=useState("abs");
+
+  const fuentes=useMemo(()=>[...new Set(operaciones.map(o=>o.fuente))].sort((a,b)=>a.localeCompare(b,"es")),[operaciones]);
+  const nombresLinea=useMemo(()=>[...new Set(operaciones.map(o=>o.linea).filter(Boolean))].sort(),[operaciones]);
+
+  const filtradas=useMemo(()=>{
+    const q=normalizarTxt(texto).trim();
+    return operaciones.filter(o=>{
+      if(desde&&o.fecha<desde)return false;
+      if(hasta&&o.fecha>hasta)return false;
+      if(fuente!=="TODAS"&&o.fuente!==fuente)return false;
+      if(linea!=="TODAS"&&o.linea!==linea)return false;
+      if(regional!=="TODAS"&&o.regional!==regional)return false;
+      if(q){const c=o.credito;if(!normalizarTxt(`${c.productor.nombre} ${c.productor.dni} ${c.expediente} ${o.folio}`).includes(q))return false;}
+      return true;
+    });
+  },[operaciones,desde,hasta,fuente,linea,regional,texto]);
+
+  const est=useMemo(()=>{
+    const t={total:0,capital:0,interes:0,mora:0,punitorio:0},porFuente=new Map(),porMes=new Map();
+    filtradas.forEach(o=>{
+      t.total+=o.total;Object.keys(o.porConcepto).forEach(k=>t[k]+=o.porConcepto[k]);
+      const f=porFuente.get(o.fuente)||{fuente:o.fuente,n:0,capital:0,interes:0,moraPun:0,total:0};
+      f.n++;f.capital+=o.porConcepto.capital;f.interes+=o.porConcepto.interes;f.moraPun+=o.porConcepto.mora+o.porConcepto.punitorio;f.total+=o.total;
+      porFuente.set(o.fuente,f);
+      const m=o.fecha.slice(0,7);porMes.set(m,(porMes.get(m)||0)+o.total);
+    });
+    Object.keys(t).forEach(k=>t[k]=r2(t[k]));
+    return{...t,porFuente:[...porFuente.values()].sort((a,b)=>b.total-a.total),
+      porMes:[...porMes.entries()].sort().slice(-24).map(([m,v])=>({mes:`${m.slice(5)}/${m.slice(2,4)}`,total:r2(v)}))};
+  },[filtradas]);
+
+  // Identificar: el monto se compara con el total del pago y con cada
+  // concepto por separado (a veces sólo se deposita la parte de capital).
+  const montoN=parseMonto(montoBus);
+  const coincidencias=useMemo(()=>{
+    if(montoN==null&&!fechaBus)return null;
+    const md=Number(margenDias)||0;
+    const tol=m=>tolerancia==="abs"?1:m*(tolerancia==="p1"?0.01:0.05);
+    const out=[];
+    operaciones.forEach(o=>{
+      let dDias=0;
+      if(fechaBus){dDias=Math.abs(diasEntre(fechaBus,o.fecha));if(dDias>md)return;}
+      let parte=null,dMonto=0;
+      if(montoN!=null){
+        const opciones=[["total del pago",o.total],...Object.entries(o.porConcepto).filter(([,v])=>v>0&&v!==o.total).map(([k,v])=>[`parte de ${CONCEPTOS_PAGO[k].toLowerCase()}`,v])];
+        const mejor=opciones.map(([l,v])=>[l,Math.abs(v-montoN)]).sort((a,b)=>a[1]-b[1])[0];
+        if(mejor[1]>tol(montoN))return;
+        parte=mejor[0];dMonto=mejor[1];
+      }
+      out.push({o,dDias,dMonto,parte});
+    });
+    return out.sort((a,b)=>(a.dMonto>1)-(b.dMonto>1)||a.dDias-b.dDias||a.dMonto-b.dMonto).slice(0,100);
+  },[operaciones,montoN,fechaBus,margenDias,tolerancia]);
+
+  function exportarCsv(){
+    const filas=[["Fecha","Productor","DNI/CUIT","Expediente","Fuente de financiamiento","Línea","Regional","Capital","Interés","Mora","Punitorio","Total","Folio","Cuotas"]];
+    filtradas.forEach(o=>filas.push([fmtDate(o.fecha),o.credito.productor.nombre,o.credito.productor.dni,o.credito.expediente,o.fuente,o.linea,o.regional,
+      montoCsv(o.porConcepto.capital),montoCsv(o.porConcepto.interes),montoCsv(o.porConcepto.mora),montoCsv(o.porConcepto.punitorio),montoCsv(o.total),o.folio,o.cuotas.join(" ")]));
+    const csv="﻿"+filas.map(f=>f.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(";")).join("\r\n");
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+    a.download=`pagos_registrados_${todayStr()}.csv`;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+  function imprimir(){
+    const esc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const filtrosTxt=[desde&&`desde ${fmtDate(desde)}`,hasta&&`hasta ${fmtDate(hasta)}`,fuente!=="TODAS"&&`fuente: ${fuente}`,linea!=="TODAS"&&`línea: ${linea}`,regional!=="TODAS"&&`regional: ${regional}`,texto&&`búsqueda: ${texto}`].filter(Boolean).join(" · ")||"todos los pagos";
+    onPrint(`<h2 style="margin:0 0 4px">Pagos registrados</h2>
+      <div style="font-size:10pt;color:#555;margin-bottom:10px">Generado el ${fmtDate(todayStr())} · ${esc(filtrosTxt)}</div>
+      <p><b>Total cobrado: ${money(est.total)}</b> en ${filtradas.length} pagos · Capital ${money(est.capital)} · Interés ${money(est.interes)} · Mora ${money(est.mora)} · Punitorio ${money(est.punitorio)}</p>
+      <table><thead><tr><th>Fuente de financiamiento</th><th>Pagos</th><th>Capital</th><th>Interés</th><th>Mora + punit.</th><th>Total</th></tr></thead><tbody>
+      ${est.porFuente.map(f=>`<tr><td>${esc(f.fuente)}</td><td>${f.n}</td><td>${money(f.capital)}</td><td>${money(f.interes)}</td><td>${money(f.moraPun)}</td><td><b>${money(f.total)}</b></td></tr>`).join("")}
+      </tbody></table>
+      <table><thead><tr><th>Fecha</th><th>Productor</th><th>Expte.</th><th>Fuente</th><th>Detalle</th><th>Folio</th><th>Total</th></tr></thead><tbody>
+      ${filtradas.map(o=>`<tr><td>${fmtDate(o.fecha)}</td><td>${esc(o.credito.productor.nombre)}<br/><small>${esc(o.credito.productor.dni)}</small></td><td>${esc(o.credito.expediente)}</td><td>${esc(o.fuente)}</td><td>${esc(detalleConceptos(o))}</td><td>${esc(o.folio)}</td><td><b>${money(o.total)}</b></td></tr>`).join("")}
+      </tbody></table>`);
+  }
+
+  const MAX_FILAS=300;
+  const sel={...iS,padding:"6px 8px",fontSize:12};
+  const tab=id=>({padding:"8px 14px",border:"none",borderBottom:`3px solid ${pestana===id?"var(--color-primary)":"transparent"}`,background:"transparent",cursor:"pointer",fontWeight:700,fontSize:13,color:pestana===id?"var(--color-primary)":"#5B6B63",fontFamily:"inherit"});
+  const filaPago=(o,extra)=><tr key={o.id} style={{borderTop:"1px solid #EEE9D9"}}>
+    <td style={{...TD,whiteSpace:"nowrap"}}>{fmtDate(o.fecha)}</td>
+    <td style={TD}><div style={{fontWeight:600}}>{o.credito.productor.nombre}</div><div style={{fontSize:10.5,color:"#8A8470"}}>{o.credito.productor.dni||"-"} · Expte. {o.credito.expediente}</div></td>
+    <td style={TD}>{o.fuente}<div style={{fontSize:10.5,color:"#8A8470"}}>{o.linea}</div></td>
+    <td style={TD}>{detalleConceptos(o)}<div style={{fontSize:10.5,color:"#8A8470"}}>{o.cuotas.join(" · ")}</div></td>
+    <td style={TD}>{o.folio||<span style={{color:"#B0AA94"}}>-</span>}</td>
+    <td style={{...TD,fontFamily:"monospace",fontWeight:700,whiteSpace:"nowrap",textAlign:"right"}}>{money(o.total)}</td>
+    {extra}
+    <td style={TD}><button onClick={()=>onSelectCredito(o.credito)} style={{...iBtn,fontSize:11,whiteSpace:"nowrap"}}>Abrir crédito</button></td>
+  </tr>;
+  const cabecera=extra=><thead><tr style={{background:"#F0ECDD",textAlign:"left"}}>
+    <th style={TH}>Fecha</th><th style={TH}>Productor</th><th style={TH}>Fuente / línea</th><th style={TH}>Detalle</th><th style={TH}>Folio</th><th style={{...TH,textAlign:"right"}}>Total</th>{extra}<th style={TH}></th>
+  </tr></thead>;
+
+  return <div style={{position:"fixed",inset:0,background:"rgba(35,30,15,0.55)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div style={{background:"#FBFAF4",borderRadius:12,width:1180,maxWidth:"100%",height:"min(900px,100%)",display:"flex",flexDirection:"column",boxShadow:"0 10px 40px rgba(0,0,0,0.3)",overflow:"hidden"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px 0"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:16,color:"#23362B",display:"flex",alignItems:"center",gap:7}}><Receipt size={17} color="var(--color-primary)"/>Pagos registrados</div>
+          <div style={{fontSize:11.5,color:"#8A8470"}}>Los pagos cargados en la liquidación individual de cada crédito. Cada fila es un depósito: lo que se registró en el mismo crédito con la misma fecha y folio.</div>
+        </div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+      </div>
+      <div style={{display:"flex",gap:4,padding:"6px 16px 0",borderBottom:"1px solid #E4DFCF"}}>
+        <button style={tab("registro")} onClick={()=>setPestana("registro")}>Registro y estadísticas</button>
+        <button style={tab("identificar")} onClick={()=>setPestana("identificar")}>Identificar un pago</button>
+      </div>
+
+      {pestana==="registro"&&<div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+          <label style={{fontSize:11,color:"#5B6B63"}}>Desde<input type="date" min="2000-01-01" style={{...sel,display:"block",width:140}} value={desde} onChange={e=>setDesde(e.target.value)}/></label>
+          <label style={{fontSize:11,color:"#5B6B63"}}>Hasta<input type="date" min="2000-01-01" style={{...sel,display:"block",width:140}} value={hasta} onChange={e=>setHasta(e.target.value)}/></label>
+          <select style={{...sel,width:200}} value={fuente} onChange={e=>setFuente(e.target.value)}><option value="TODAS">Todas las fuentes</option>{fuentes.map(f=><option key={f} value={f}>{f}</option>)}</select>
+          <select style={{...sel,width:200}} value={linea} onChange={e=>setLinea(e.target.value)}><option value="TODAS">Todas las líneas</option>{nombresLinea.map(l=><option key={l} value={l}>{l}</option>)}</select>
+          <select style={{...sel,width:170}} value={regional} onChange={e=>setRegional(e.target.value)}><option value="TODAS">Todas las regionales</option>{[...REGIONALES_LISTA,"Sin asignar"].map(r=><option key={r} value={r}>{REGIONALES_NOMBRE[r]||r}</option>)}</select>
+          <div style={{position:"relative",flex:"1 1 180px"}}><Search size={13} style={{position:"absolute",left:9,top:9,color:"#9A9482"}}/><input style={{...sel,paddingLeft:28}} placeholder="Productor, DNI, expediente o folio" value={texto} onChange={e=>setTexto(e.target.value)}/></div>
+          <div style={{display:"flex",gap:6}}>
+            <Boton size="sm" variant="outline" icon={FileText} onClick={exportarCsv} disabled={!filtradas.length}>Exportar a Excel</Boton>
+            <Boton size="sm" variant="outline" icon={Printer} onClick={imprimir} disabled={!filtradas.length}>Imprimir</Boton>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:12}}>
+          <KpiCard label="Total cobrado" value={money(est.total)} tone="success"/>
+          <KpiCard label="Pagos" value={filtradas.length}/>
+          <KpiCard label="Capital" value={money(est.capital)}/>
+          <KpiCard label="Interés financiero" value={money(est.interes)}/>
+          <KpiCard label="Mora + punitorio" value={money(r2(est.mora+est.punitorio))}/>
+        </div>
+        {sinFecha>0&&!desde&&!hasta&&<div style={{fontSize:11.5,color:"#8A5C00",background:"#FFF8E7",border:"1px solid #E0B44C",borderRadius:6,padding:"6px 10px",marginBottom:12}}>
+          Además hay {money(sinFecha)} cobrados que figuran en los créditos sin el detalle de la fecha de pago (cargas anteriores); no están incluidos en este registro.
+        </div>}
+
+        {filtradas.length>0&&<div style={{display:"grid",gridTemplateColumns:"1.1fr 1fr",gap:12,marginBottom:14}}>
+          <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"hidden"}}>
+            <div style={{fontWeight:700,fontSize:12.5,color:"#23362B",padding:"8px 12px"}}>Cobrado por fuente de financiamiento</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}><th style={TH}>Fuente</th><th style={TH}>Pagos</th><th style={{...TH,textAlign:"right"}}>Capital</th><th style={{...TH,textAlign:"right"}}>Interés</th><th style={{...TH,textAlign:"right"}}>Mora + punit.</th><th style={{...TH,textAlign:"right"}}>Total</th></tr></thead>
+              <tbody>{est.porFuente.map(f=><tr key={f.fuente} style={{borderTop:"1px solid #EEE9D9",cursor:"pointer"}} title="Filtrar por esta fuente" onClick={()=>setFuente(f.fuente)}>
+                <td style={{...TD,fontWeight:600}}>{f.fuente}</td><td style={TD}>{f.n}</td>
+                {[f.capital,f.interes,f.moraPun].map((v,i)=><td key={i} style={{...TD,fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{money(v)}</td>)}
+                <td style={{...TD,fontFamily:"monospace",textAlign:"right",fontWeight:700,whiteSpace:"nowrap"}}>{money(f.total)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,padding:"8px 12px"}}>
+            <div style={{fontWeight:700,fontSize:12.5,color:"#23362B",marginBottom:4}}>Cobrado por mes{est.porMes.length>=24?" (últimos 24)":""}</div>
+            <ResponsiveContainer width="100%" height={190}><BarChart data={est.porMes} margin={{top:8,right:6,left:6,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#EEE9D9"/>
+              <XAxis dataKey="mes" tick={{fontSize:10,fill:"#5B6B63"}}/>
+              <YAxis tick={{fontSize:10,fill:"#5B6B63"}} tickFormatter={v=>v>=1e6?`${(v/1e6).toLocaleString("es-AR",{maximumFractionDigits:1})} M`:v>=1e3?`${Math.round(v/1e3)} mil`:v} width={52}/>
+              <Tooltip contentStyle={{fontSize:12,borderRadius:8,border:"1px solid #E4DFCF"}} formatter={v=>[money(v),"Cobrado"]}/>
+              <Bar dataKey="total" fill={colorBarras||"#ff682c"} radius={[4,4,0,0]} isAnimationActive={false}/>
+            </BarChart></ResponsiveContainer>
+          </div>
+        </div>}
+
+        <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            {cabecera()}
+            <tbody>
+              {filtradas.slice(0,MAX_FILAS).map(o=>filaPago(o))}
+              {filtradas.length===0&&<tr><td colSpan={7} style={{...TD,textAlign:"center",color:"#9A9482",padding:24}}>{operaciones.length?"No hay pagos que coincidan con los filtros.":"Todavía no hay pagos registrados en las liquidaciones de los créditos."}</td></tr>}
+            </tbody>
+          </table>
+          {filtradas.length>MAX_FILAS&&<div style={{padding:"8px 12px",fontSize:11.5,color:"#8A8470"}}>Se muestran los {MAX_FILAS} pagos más recientes de {filtradas.length}. Afiná los filtros, o usá "Exportar a Excel" para tenerlos todos.</div>}
+        </div>
+      </div>}
+
+      {pestana==="identificar"&&<div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
+        <div style={{fontSize:12,color:"#5B6B63",marginBottom:10,lineHeight:1.5}}>Ingresá el monto y la fecha del depósito que no se pudo individualizar. Se busca entre todos los pagos cargados, comparando el monto con el total de cada pago y también con cada concepto por separado.</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+          <label style={{fontSize:12,fontWeight:600,color:"#5B6B63"}}>Monto<input style={{...iS,display:"block",width:170,marginTop:4}} inputMode="decimal" placeholder="Ej: 125.400,50" value={montoBus} onChange={e=>setMontoBus(e.target.value)} autoFocus/></label>
+          <label style={{fontSize:12,fontWeight:600,color:"#5B6B63"}}>Precisión del monto<select style={{...iS,display:"block",width:160,marginTop:4}} value={tolerancia} onChange={e=>setTolerancia(e.target.value)}>
+            <option value="abs">Exacto (± $1)</option><option value="p1">Aproximado (± 1 %)</option><option value="p5">Aproximado (± 5 %)</option>
+          </select></label>
+          <label style={{fontSize:12,fontWeight:600,color:"#5B6B63"}}>Fecha<input type="date" min="2000-01-01" style={{...iS,display:"block",width:160,marginTop:4}} value={fechaBus} onChange={e=>setFechaBus(e.target.value)}/></label>
+          <label style={{fontSize:12,fontWeight:600,color:"#5B6B63"}}>Margen de días<select style={{...iS,display:"block",width:150,marginTop:4}} value={margenDias} onChange={e=>setMargenDias(e.target.value)} disabled={!fechaBus}>
+            <option value="0">Mismo día</option><option value="3">± 3 días</option><option value="7">± 7 días</option><option value="15">± 15 días</option><option value="30">± 30 días</option>
+          </select></label>
+          {(montoBus||fechaBus)&&<Boton size="sm" variant="ghost" onClick={()=>{setMontoBus("");setFechaBus("");}}>Limpiar</Boton>}
+        </div>
+        {montoBus&&montoN==null&&<div style={{fontSize:12,color:"var(--color-danger)",marginBottom:8}}>El monto no es un número válido.</div>}
+        {coincidencias===null
+          ?<div style={{fontSize:12.5,color:"#9A9482",textAlign:"center",padding:30}}>Ingresá al menos el monto o la fecha para buscar.</div>
+          :<div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
+            <div style={{padding:"8px 12px",fontSize:12,fontWeight:700,color:"#23362B"}}>{coincidencias.length?`${coincidencias.length} pago${coincidencias.length===1?"":"s"} posible${coincidencias.length===1?"":"s"}${coincidencias.length>=100?" (se muestran los 100 más cercanos)":""}`:"No se encontró ningún pago con esos datos."}</div>
+            {coincidencias.length>0&&<table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              {cabecera(<th style={TH}>Coincidencia</th>)}
+              <tbody>{coincidencias.map(({o,dDias,dMonto,parte})=>filaPago(o,<td style={{...TD,fontSize:11}}>
+                {parte&&<div style={{fontWeight:700,color:dMonto<=1?"var(--color-success)":"#B26A00"}}>{dMonto<=1?"Monto exacto":`Difiere en ${money(dMonto)}`}<span style={{fontWeight:400,color:"#8A8470"}}> ({parte})</span></div>}
+                {fechaBus&&<div style={{color:dDias===0?"var(--color-success)":"#8A8470"}}>{dDias===0?"Misma fecha":`${dDias} día${dDias===1?"":"s"} de diferencia`}</div>}
+              </td>))}</tbody>
+            </table>}
+          </div>}
+      </div>}
+    </div>
+  </div>;
+}
+
 function CrecerApp(){
   const[loading,setLoading]=useState(true);
   const[usuarios,setUsuarios]=useState(DEFAULT_USUARIOS);
@@ -3650,6 +3920,7 @@ function CrecerApp(){
   const[showSimulador,setShowSimulador]=useState(false);
   const[showEstadoCuenta,setShowEstadoCuenta]=useState(false);
   const[showPadron,setShowPadron]=useState(false);
+  const[showPagos,setShowPagos]=useState(false);
   const[busqueda,setBusqueda]=useState("");
   const[filtroEstado,setFiltroEstado]=useState("TODOS");
   const[filtroRegional,setFiltroRegional]=useState("TODAS");
@@ -3891,6 +4162,7 @@ function CrecerApp(){
             }/>
           <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14,flexWrap:"wrap"}}>
             {isAdmin&&<Boton variant="outline" icon={MapPin} onClick={()=>setShowPadron(true)}>Vincular con padrón RENSPA</Boton>}
+            {user.rol!=="productor"&&<Boton variant="outline" icon={Receipt} onClick={()=>setShowPagos(true)}>Pagos registrados</Boton>}
             <Boton icon={FileSignature} onClick={()=>setShowEstadoCuenta(true)}>Estado de cuenta — Listado de productores</Boton>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:10}}>
@@ -4001,6 +4273,7 @@ function CrecerApp(){
     {/* Simulador de cuotas modal */}
     {showSimulador&&<SimuladorCuotas lineas={lineas} onClose={()=>setShowSimulador(false)} onPrint={imprimirHTML}/>}
     {showPadron&&isAdmin&&<VincularPadronModal creditos={creditos} onAplicar={agregarUbicaciones} onClose={()=>setShowPadron(false)}/>}
+    {showPagos&&user.rol!=="productor"&&<PagosListado creditos={creditosVisibles} lineas={lineas} colorBarras={tema.primary} onClose={()=>setShowPagos(false)} onPrint={imprimirHTML} onSelectCredito={c=>{setShowPagos(false);setSelected(c);}}/>}
     {showEstadoCuenta&&<EstadoCuentaListado creditos={creditosVisibles} lineas={lineas} onClose={()=>setShowEstadoCuenta(false)} onPrint={imprimirHTML} onSelectCredito={c=>{setShowEstadoCuenta(false);setSelected(c);}}/>}
 
     {/* Chat DM flotante — siempre visible */}
