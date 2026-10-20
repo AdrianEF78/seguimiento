@@ -618,6 +618,40 @@ function EstadoBadge({estado}){
   const{l,c,b,I}=m[estado]||m.SIN_CRONOGRAMA;
   return <span style={{color:c,background:b,borderColor:c,display:"inline-flex",alignItems:"center",gap:5,padding:"3px 9px",borderRadius:20,fontSize:12,fontWeight:600,border:"1.5px solid",whiteSpace:"nowrap"}}><I size={12}/>{l}</span>;
 }
+// ── Situación del crédito (gestión de cobranza) ──────────────────────────────
+// La carga solo el Gestor; el resto de los roles únicamente la visualiza.
+// Colores: verde = al día · azul = llamada/mensaje · amarillo = nota ·
+// naranja = carta documento · rojo = legales.
+const SITUACIONES=[
+  {id:"alDia",label:"Al día",bg:"#2E7D46",fg:"#FFFFFF",punto:"🟢"},
+  {id:"llamada",label:"Llamada - Msj",bg:"#2563EB",fg:"#FFFFFF",punto:"🔵"},
+  {id:"nota",label:"Nota",bg:"#FACC15",fg:"#3B2F00",punto:"🟡"},
+  {id:"cartaDocumento",label:"Carta Documento",bg:"#F97316",fg:"#FFFFFF",punto:"🟠"},
+  {id:"legales",label:"Legales",bg:"#DC2626",fg:"#FFFFFF",punto:"🔴"},
+];
+function SituacionBadge({valor,editable,onChange,corto}){
+  const[abierto,setAbierto]=useState(false);
+  const s=SITUACIONES.find(x=>x.id===valor);
+  const base={display:"inline-flex",alignItems:"center",gap:5,padding:corto?"2px 8px":"3px 10px",borderRadius:20,fontSize:corto?11:12,fontWeight:700,whiteSpace:"nowrap",border:"1.5px solid",fontFamily:"inherit"};
+  const estilo=s?{...base,background:s.bg,color:s.fg,borderColor:s.bg}:{...base,background:"transparent",color:"#6B6560",borderColor:"#C9C2A6",fontWeight:600};
+  const contenido=<>{corto?"":"Situación: "}{s?s.label:(corto?"Sin definir":"sin definir")}{editable&&<span className="no-imprimir" style={{display:"inline-flex"}}><ChevronDown size={12}/></span>}</>;
+  if(!editable)return <span title="Situación del crédito" style={estilo}>{contenido}</span>;
+  return <span style={{position:"relative",display:"inline-block"}}>
+    <button type="button" title="Cambiar la situación del crédito" onClick={()=>setAbierto(o=>!o)} style={{...estilo,cursor:"pointer"}}>{contenido}</button>
+    {abierto&&<span className="no-imprimir">
+      <div onClick={()=>setAbierto(false)} style={{position:"fixed",inset:0,zIndex:60}}/>
+      <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:61,background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,0.18)",padding:10,minWidth:220,display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#5B6B63",textTransform:"uppercase",letterSpacing:"0.05em"}}>Situación del crédito</div>
+        {SITUACIONES.map(o=><button key={o.id} type="button" onClick={()=>{onChange(o.id);setAbierto(false);}}
+          style={{...base,width:"100%",justifyContent:"space-between",cursor:"pointer",background:o.bg,color:o.fg,borderColor:valor===o.id?"#000":o.bg,borderWidth:valor===o.id?2:1.5}}>
+          <span>{o.label}</span>{valor===o.id&&<CheckCircle2 size={14}/>}
+        </button>)}
+        {valor&&<button type="button" onClick={()=>{onChange(null);setAbierto(false);}} style={{background:"transparent",border:"none",color:"#6B6560",fontSize:12,cursor:"pointer",textDecoration:"underline",padding:"2px 0"}}>Quitar situación</button>}
+      </div>
+    </span>}
+  </span>;
+}
+
 function RendicionBadge({ok}){
   const c=ok?"var(--color-success)":"var(--color-danger)";
   const b=ok?"var(--color-success-bg)":"var(--color-danger-bg)";
@@ -663,6 +697,170 @@ function SectionTitle({icon:I,title,subtitle}){
 // superior de cada pantalla y modal. Los 3 colores se editan desde Apariencia.
 function BandaTricolor({radius,marginBottom=16}){
   return <div style={{height:8,width:"100%",background:"var(--gradiente-banda)",borderRadius:radius||0,marginBottom}}/>;
+}
+// ── Datos del establecimiento: actividad, estación del año y asociación ──
+const ESTACIONES=["Primavera","Verano","Otoño","Invierno"];
+function textoEstaciones(arr){
+  const a=Array.isArray(arr)?arr:[];
+  if(!a.length)return null;
+  if(ESTACIONES.every(e=>a.includes(e)))return "Todo el año";
+  return ESTACIONES.filter(e=>a.includes(e)).join(", ");
+}
+function textoAsociacion(valor,nombre){
+  if(valor==="si")return nombre?`Sí – ${nombre}`:"Sí (sin especificar cuál)";
+  if(valor==="no")return "No";
+  return null;
+}
+// Casillas de estaciones (+ "Todo el año"). No usa <Campo> porque éste es un <label>.
+function EstacionesInput({value,onChange,titulo="Estación del año en que se realiza"}){
+  const sel=Array.isArray(value)?value:[];
+  const todo=ESTACIONES.every(e=>sel.includes(e));
+  const toggle=e=>onChange(sel.includes(e)?sel.filter(x=>x!==e):[...sel,e]);
+  const op={display:"inline-flex",alignItems:"center",gap:5,fontSize:13,cursor:"pointer"};
+  return <div style={{marginBottom:11}}>
+    <div style={{fontSize:12,fontWeight:600,color:"#5B6B63",marginBottom:4}}>{titulo}</div>
+    <div style={{display:"flex",flexWrap:"wrap",gap:"6px 14px",padding:"8px 10px",border:"1.5px solid #DCD6C2",borderRadius:7,background:"#FCFBF6"}}>
+      {ESTACIONES.map(e=><label key={e} style={op}><input type="checkbox" checked={sel.includes(e)} onChange={()=>toggle(e)} style={{width:15,height:15}}/>{e}</label>)}
+      <label style={{...op,fontWeight:600}}><input type="checkbox" checked={todo} onChange={()=>onChange(todo?[]:[...ESTACIONES])} style={{width:15,height:15}}/>Todo el año</label>
+    </div>
+  </div>;
+}
+function AsociacionInput({valor,nombre,onValor,onNombre}){
+  return <>
+    <Campo label="¿Pertenece a una Asociación de productores?">
+      <select style={iS} value={valor||""} onChange={e=>onValor(e.target.value)}>
+        <option value="">(seleccionar)</option>
+        <option value="no">No</option>
+        <option value="si">Sí</option>
+      </select>
+    </Campo>
+    {valor==="si"&&<Campo label="¿A cuál? (nombre de la asociación)"><input style={iS} value={nombre||""} onChange={e=>onNombre(e.target.value)} placeholder="Nombre de la asociación"/></Campo>}
+  </>;
+}
+
+// ── Seguimiento del crédito (sección 4 de la planilla) ───────────────────────
+// Registro cronológico de las gestiones sobre el crédito: fecha, situación,
+// a quién se dirigió (Productor / Regional / Subsecretario), n° de nota, n° de seguimiento,
+// estado (Enviada / Entregada / Rechazada) y una observación. Lo ven Gestor y Consulta; solo el
+// Gestor carga, edita y elimina.
+const SEG_DESTINOS=["Productor","Regional","Subsecretario"];
+const SEG_ESTADOS=[
+  {id:"enviada",label:"Enviada",c:"#5B6B63",b:"#EEF0EE"},
+  {id:"entregada",label:"Entregada",c:"#2E7D46",b:"#E6F3EA"},
+  {id:"rechazada",label:"Rechazada",c:"#C0392B",b:"#FBE9E7"},
+];
+function SegEstadoPill({id}){
+  const e=SEG_ESTADOS.find(x=>x.id===id);
+  if(!e)return <span style={{color:"#B0AA94"}}>-</span>;
+  return <span style={{display:"inline-flex",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700,color:e.c,background:e.b,border:`1.5px solid ${e.c}`,whiteSpace:"nowrap"}}>{e.label}</span>;
+}
+// El cuadro es de solo lectura (compacto); el Gestor carga y edita desde el
+// formulario que está debajo. "N° de Nota" es el número de la nota y
+// "N° de seguimiento" el código de seguimiento de la gestión (por ejemplo el
+// postal de una carta documento). Ambos son opcionales: no todas las gestiones
+// los tienen (una llamada, por ejemplo).
+function SeguimientoCredito({credito,puedeEditar,onUpdate}){
+  const lista=Array.isArray(credito.seguimiento)?credito.seguimiento:[];
+  const ordenada=[...lista].sort((a,b)=>String(a.fecha||"").localeCompare(String(b.fecha||"")));
+  const vacio=()=>({numeroNota:"",numeroSeguimiento:"",fecha:todayStr(),situacion:undefined,destino:"",estado:"enviada",observacion:""});
+  const[form,setForm]=useState(vacio);
+  const[editId,setEditId]=useState(null);
+  const[confirmId,setConfirmId]=useState(null);
+  const[msg,setMsg]=useState("");
+  // Si no se elige otra, la situación propuesta es la que tiene hoy el crédito
+  const sit=form.situacion!==undefined?form.situacion:(credito.situacion||"");
+  const set=(k,v)=>setForm({...form,[k]:v});
+  const guardar=arr=>onUpdate({...credito,seguimiento:arr});
+  function cancelar(){setEditId(null);setForm(vacio());setMsg("");}
+  function enviar(){
+    if(!form.fecha||!sit||!form.destino){setMsg("Completá la fecha, la situación y el destino.");return;}
+    const dato={numeroNota:(form.numeroNota||"").trim(),numeroSeguimiento:(form.numeroSeguimiento||"").trim(),fecha:form.fecha,situacion:sit,destino:form.destino,estado:form.estado||"enviada",observacion:(form.observacion||"").trim()};
+    if(editId)guardar(lista.map(s=>s.id===editId?{...s,...dato}:s));
+    else guardar([...lista,{id:`seg-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,...dato}]);
+    cancelar();
+  }
+  function editar(s){
+    setEditId(s.id);setConfirmId(null);setMsg("");
+    setForm({numeroNota:s.numeroNota||"",numeroSeguimiento:s.numeroSeguimiento||"",fecha:s.fecha,situacion:s.situacion,destino:s.destino,estado:s.estado||"enviada",observacion:s.observacion||""});
+  }
+  function eliminar(id){
+    guardar(lista.filter(x=>x.id!==id));
+    setConfirmId(null);
+    if(editId===id)cancelar();
+  }
+  const btnIcono={background:"transparent",border:"1px solid #DCD6C2",borderRadius:6,cursor:"pointer",padding:"3px 5px",display:"inline-flex",alignItems:"center",color:"#5B6B63"};
+  const th={...TH,textAlign:"left",padding:"6px 6px"};
+  const td={...TD,padding:"6px 6px"};
+  const nCol=7+(puedeEditar?1:0);
+  return <div>
+    <div style={{overflowX:"auto"}}>
+      <table style={{width:"100%",minWidth:puedeEditar?802:734,tableLayout:"fixed",borderCollapse:"collapse",fontSize:12}}>
+        <colgroup><col style={{width:84}}/><col style={{width:134}}/><col style={{width:94}}/><col style={{width:96}}/><col style={{width:118}}/><col style={{width:88}}/><col/>{puedeEditar&&<col style={{width:68}}/>}</colgroup>
+        <thead><tr style={{background:"#F0ECDD"}}>
+          <th style={th}>Fecha</th><th style={th}>Situación</th><th style={th}>Destino</th>
+          <th style={th}>N° de Nota</th><th style={{...th,whiteSpace:"normal"}}>N° de seguimiento</th><th style={th}>Estado</th><th style={th}>Observación</th>
+          {puedeEditar&&<th className="no-imprimir" style={TH}></th>}
+        </tr></thead>
+        <tbody>
+          {ordenada.length===0&&<tr><td colSpan={nCol} style={{...td,textAlign:"center",color:"#9A9482",padding:"14px 8px"}}>Todavía no hay seguimientos cargados.</td></tr>}
+          {ordenada.map(s=><tr key={s.id} style={{borderTop:"1px solid #EEE9D9",background:editId===s.id?"#FFF8E6":"transparent"}}>
+            <td style={{...td,whiteSpace:"nowrap"}}>{fmtDate(s.fecha)}</td>
+            <td style={td}><SituacionBadge valor={s.situacion} corto/></td>
+            <td style={td}>{s.destino}</td>
+            <td style={{...td,wordBreak:"break-all"}}>{s.numeroNota||<span style={{color:"#B0AA94"}}>-</span>}</td>
+            <td style={{...td,wordBreak:"break-all"}}>{s.numeroSeguimiento||<span style={{color:"#B0AA94"}}>-</span>}</td>
+            <td style={td}><SegEstadoPill id={s.estado}/></td>
+            <td style={{...td,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{s.observacion||<span style={{color:"#B0AA94"}}>-</span>}</td>
+            {puedeEditar&&<td className="no-imprimir" style={{...td,whiteSpace:confirmId===s.id?"normal":"nowrap"}}>
+              {confirmId===s.id
+                ?<span style={{fontSize:11.5,color:"#A23B2E"}}>¿Eliminar?{" "}
+                  <button type="button" onClick={()=>eliminar(s.id)} style={{...btnIcono,color:"#A23B2E",borderColor:"#A23B2E",fontSize:11.5}}>Sí</button>{" "}
+                  <button type="button" onClick={()=>setConfirmId(null)} style={{...btnIcono,fontSize:11.5}}>No</button></span>
+                :<>
+                  <button type="button" title="Editar" onClick={()=>editar(s)} style={btnIcono}><Pencil size={14}/></button>{" "}
+                  <button type="button" title="Eliminar" onClick={()=>setConfirmId(s.id)} style={btnIcono}><Trash2 size={14}/></button>
+                </>}
+            </td>}
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+    {puedeEditar&&<div className="no-imprimir" style={{marginTop:12,padding:"12px 14px 4px",background:editId?"#FFF8E6":"#FBF9F1",border:"1px solid #E4DFCF",borderRadius:8}}>
+      <div style={{fontWeight:700,fontSize:12.5,color:"var(--color-titulo)",marginBottom:8}}>{editId?"Editando seguimiento":"Agregar seguimiento"}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"0 12px"}}>
+        <Campo label="Fecha"><input style={iS} type="date" min="2000-01-01" value={form.fecha||""} onChange={e=>set("fecha",e.target.value)}/></Campo>
+        <Campo label="Situación"><select style={iS} value={sit} onChange={e=>set("situacion",e.target.value)}>
+          <option value="">(elegir)</option>{SITUACIONES.map(x=><option key={x.id} value={x.id}>{x.punto} {x.label}</option>)}
+        </select></Campo>
+        <Campo label="Destino"><select style={iS} value={form.destino||""} onChange={e=>set("destino",e.target.value)}>
+          <option value="">(elegir)</option>{SEG_DESTINOS.map(d=><option key={d} value={d}>{d}</option>)}
+        </select></Campo>
+        <Campo label="N° de Nota"><input style={iS} value={form.numeroNota||""} onChange={e=>set("numeroNota",e.target.value)} placeholder="Ej: Nota 112/26"/></Campo>
+        <Campo label="N° de seguimiento"><input style={iS} value={form.numeroSeguimiento||""} onChange={e=>set("numeroSeguimiento",e.target.value)} placeholder="Ej: código de seguimiento"/></Campo>
+        <Campo label="Estado"><select style={iS} value={form.estado||"enviada"} onChange={e=>set("estado",e.target.value)}>
+          {SEG_ESTADOS.map(x=><option key={x.id} value={x.id}>{x.label}</option>)}
+        </select></Campo>
+      </div>
+      <Campo label="Observación"><textarea style={{...iS,resize:"vertical",minHeight:54}} rows={2} value={form.observacion||""} onChange={e=>set("observacion",e.target.value)}/></Campo>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+        <Boton size="sm" icon={editId?Save:Plus} onClick={enviar}>{editId?"Guardar cambios":"Agregar"}</Boton>
+        {editId&&<Boton size="sm" variant="outline" onClick={cancelar}>Cancelar</Boton>}
+        {msg&&<span style={{fontSize:12,color:"#A23B2E"}}>{msg}</span>}
+      </div>
+    </div>}
+  </div>;
+}
+
+// Zonas en que se divide la planilla individual del crédito:
+// 1 · Datos personales  2 · Datos del establecimiento  3 · Datos del crédito
+function ZonaTitulo({n,titulo}){
+  return <><span style={{fontFamily:"'Rubik',Georgia,sans-serif",fontSize:11,fontWeight:800,color:"#fff",background:"var(--color-primary)",borderRadius:10,minWidth:20,height:20,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{n}</span><span style={{fontFamily:"'Rubik',Georgia,sans-serif",fontSize:14,fontWeight:700,color:"var(--color-titulo)"}}>{titulo}</span></>;
+}
+function ZonaPlanilla({n,titulo,children}){
+  return <div style={{border:"1px solid #E4DFCF",borderRadius:8,background:"#fff",marginBottom:12,overflow:"hidden",breakInside:"avoid"}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",background:"#F0ECDD",borderBottom:"1px solid #E4DFCF",borderLeft:"4px solid var(--color-primary)"}}><ZonaTitulo n={n} titulo={titulo}/></div>
+    <div style={{padding:"12px 14px"}}>{children}</div>
+  </div>;
 }
 function InfoRow({label,value}){
   return <div><div style={{fontSize:10,color:"#000",fontWeight:700,letterSpacing:"0.04em"}}>{label.toUpperCase()}</div><div style={{color:"#000",fontSize:13}}>{value||"-"}</div></div>;
@@ -1022,6 +1220,11 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
   const filas=useMemo(()=>calcularFilas(credito,tasas),[credito,tasas]);
   const isAdmin=rol==="admin";
   const canMemo=rol==="admin"||rol==="viewer";
+  // Observaciones: solo las ven y modifican Gestor (admin) y Consulta (viewer);
+  // quedan ocultas para Productor y Consulta Regional.
+  const canObs=rol==="admin"||rol==="viewer";
+  // Seguimiento del crédito: lo ven solo Gestor (admin) y Consulta (viewer)
+  const canSeg=rol==="admin"||rol==="viewer";
 
   const[datos,setDatos]=useState({
     numeroContrato:credito.numeroContrato||"",email:credito.productor.email||"",
@@ -1032,6 +1235,10 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
     domicilio:credito.productor.domicilio||"",ciudad:credito.productor.ciudad||"",
     repNombre:credito.repLegal?.nombre||"",repApellido:credito.repLegal?.apellido||"",repDni:credito.repLegal?.dni||"",repTelefono:credito.repLegal?.telefono||"",
     nombreEstablecimiento:credito.nombreEstablecimiento||"",
+    numeroRenspa:credito.numeroRenspa||"",
+    actividadPrincipal:credito.actividadPrincipal||"",estacionesActividad:credito.estacionesActividad||[],
+    estacionesEgresos:credito.estacionesEgresos||[],estacionesIngresos:credito.estacionesIngresos||[],
+    asociadoAsociacion:credito.asociadoAsociacion||"",asociacionNombre:credito.asociacionNombre||"",
     ubicacionEstablecimiento:credito.ubicacionEstablecimiento||"",
     tenencia:credito.tenencia||"",
     dniCuit:credito.productor.dni||"",
@@ -1067,6 +1274,13 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       regionalOverride:datos.regionalOverride,fechaContrato:datos.fechaContrato,
       repLegal:{nombre:datos.repNombre,apellido:datos.repApellido,dni:datos.repDni,telefono:datos.repTelefono},
       nombreEstablecimiento:datos.nombreEstablecimiento,
+      numeroRenspa:(datos.numeroRenspa||"").trim(),
+      actividadPrincipal:(datos.actividadPrincipal||"").trim(),
+      estacionesActividad:datos.estacionesActividad||[],
+      estacionesEgresos:datos.estacionesEgresos||[],
+      estacionesIngresos:datos.estacionesIngresos||[],
+      asociadoAsociacion:datos.asociadoAsociacion||"",
+      asociacionNombre:datos.asociadoAsociacion==="si"?(datos.asociacionNombre||"").trim():"",
       ubicacionEstablecimiento:datos.ubicacionEstablecimiento,
       tenencia:datos.tenencia,
       productor:{...credito.productor,email:datos.email,telefono:datos.telefono,domicilio:datos.domicilio,ciudad:datos.ciudad,dni:datos.dniCuit}});
@@ -1236,7 +1450,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
   }
 
   return <div style={{position:"fixed",inset:0,background:"rgba(35,30,15,0.45)",display:"flex",justifyContent:"flex-end",zIndex:50}}>
-    <div className="printable" style={{background:"#FBFAF4",width:maximizado?"100%":860,maxWidth:"100%",height:"100%",overflowY:"auto",padding:"18px 20px",boxShadow:"-10px 0 30px rgba(0,0,0,0.15)",position:"relative",color:"var(--color-text-detalle)",transition:"width .18s ease"}}>
+    <div className="printable" style={{background:"#FBFAF4",width:maximizado?"100%":920,maxWidth:"100%",height:"100%",overflowY:"auto",padding:"18px 20px",boxShadow:"-10px 0 30px rgba(0,0,0,0.15)",position:"relative",color:"var(--color-text-detalle)",transition:"width .18s ease"}}>
 
       {/* Sello de agua: solo visible al imprimir cuando el crédito está cancelado */}
       {(estado==="CANCELADO"||credito.canceladoManual)&&(
@@ -1249,7 +1463,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
           <Boton size="lg" icon={Home} onClick={onGoHome}>Ir a Estado</Boton>
           <div>
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-              <span style={{fontSize:11,color:"#000",fontWeight:700}}>EXPEDIENTE</span>
+              <span style={{fontSize:20,color:"#000",fontWeight:800,letterSpacing:"0.01em"}}>EXPEDIENTE</span>
               <span style={{fontSize:20,color:"#000",fontWeight:800,letterSpacing:"0.01em"}}>{credito.expediente}</span>
             </div>
             <div style={{fontFamily:"'Rubik',Georgia,sans-serif",fontSize:18,fontWeight:700,color:"#23362B"}}>{credito.productor.nombre}</div>
@@ -1266,44 +1480,44 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
 
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
         <EstadoBadge estado={estado}/>
+        <SituacionBadge valor={credito.situacion} editable={isAdmin} onChange={v=>onUpdate({...credito,situacion:v})}/>
         <RendicionBadge ok={!!credito.rendicionPresentada}/>
-        <span style={{fontSize:11.5,color:"#8A8470",display:"inline-flex",alignItems:"center",gap:4}}><MapPin size={12}/>{regional==="Sin asignar"?"Sin regional":REGIONALES_NOMBRE[regional]||regional}</span>
+        <span style={{fontSize:20,color:"#000",fontWeight:800,letterSpacing:"0.01em",display:"inline-flex",alignItems:"center",gap:6}}><MapPin size={20} color="#000"/>{regional==="Sin asignar"?"Sin regional":REGIONALES_NOMBRE[regional]||regional}</span>
         {credito.esAsociado&&<span style={{fontSize:11.5,background:"#EAF3EC",color:"#1F6B3A",border:"1px solid #1F6B3A",borderRadius:12,padding:"2px 8px",fontWeight:600}}>Asociado / Cooperativa</span>}
       </div>
 
-      {/* Info general */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:13,marginBottom:12}}>
-        <InfoRow label="DNI / CUIT" value={credito.productor.dni}/>
-        <InfoRow label="Domicilio" value={`${credito.productor.domicilio||""}, ${credito.productor.ciudad||""}`}/>
-        <InfoRow label="Correo electrónico" value={credito.productor.email}/>
-        <InfoRow label="Nombre del establecimiento" value={credito.nombreEstablecimiento}/>
-        <InfoRow label="Ubicación del establecimiento" value={credito.ubicacionEstablecimiento}/>
-        <InfoRow label="Condición de la tenencia" value={credito.tenencia}/>
-        <InfoRow label="Teléfono" value={credito.productor.telefono}/>
-        <InfoRow label="Condición" value={credito.esAsociado?"Asociado / Cooperativa Agropecuaria":"Productor individual"}/>
+      {/* Zona 1 · Datos personales */}
+      <ZonaPlanilla n="1" titulo="Datos personales">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:13}}>
+          <InfoRow label="DNI / CUIT" value={credito.productor.dni}/>
+          <InfoRow label="Domicilio" value={`${credito.productor.domicilio||""}, ${credito.productor.ciudad||""}`}/>
+          <InfoRow label="Correo electrónico" value={credito.productor.email}/>
+          <InfoRow label="Teléfono" value={credito.productor.telefono}/>
+          <InfoRow label="Condición" value={credito.esAsociado?"Asociado / Cooperativa Agropecuaria":"Productor individual"}/>
+          {credito.repLegal?.nombre&&<>
+            <div style={{gridColumn:"1/-1",height:1,background:"#EEE9D9"}}/>
+            <InfoRow label="Representante legal – Nombre y apellido" value={`${credito.repLegal.nombre||""} ${credito.repLegal.apellido||""}`.trim()}/>
+            <InfoRow label="Representante legal – DNI" value={credito.repLegal.dni}/>
+            <InfoRow label="Representante legal – Teléfono" value={credito.repLegal.telefono}/>
+          </>}
+        </div>
+      </ZonaPlanilla>
 
-        <InfoRow label="Línea" value={linea?.nombre}/>
-        <InfoRow label="Destino" value={destino?.nombre||credito.detalleDestino}/>
-        <InfoRow label="Fecha de otorgamiento" value={fmtDate(credito.fechaOtorgamiento)}/>
-        <InfoRow label="Fecha de contrato" value={fmtDate(credito.fechaContrato)}/>
-        <InfoRow label="Monto otorgado" value={money(credito.monto)}/>
-        <InfoRow label={`Tasa aplicada${credito.esAsociado?" (asociado)":""}`} value={`${credito.tasaAplicada||linea?.tasaFinanciera||20}% anual`}/>
-        <InfoRow label="Contrato" value={credito.numeroContrato}/>
-        <InfoRow label="OPP" value={credito.opp}/>
-        <InfoRow label="Fuente financiamiento" value={credito.fuenteFinanciamiento}/>
-        <InfoRow label="Cuenta cobros" value={linea?.numeroCuenta?`${linea.numeroCuenta} · CBU ${linea.cbu}`:"(no informada)"}/>
-        <InfoRow label="N° de Fs. (rendición)" value={credito.rendicionPresentada?credito.rendicionFs:null}/>
-        <InfoRow label="Fecha de presentación (rendición)" value={credito.rendicionPresentada?fmtDate(credito.rendicionFecha):null}/>
-        {credito.repLegal?.nombre&&<>
-          <div style={{gridColumn:"1/-1",height:1,background:"#EEE9D9"}}/>
-          <InfoRow label="Representante legal – Nombre y apellido" value={`${credito.repLegal.nombre||""} ${credito.repLegal.apellido||""}`.trim()}/>
-          <InfoRow label="Representante legal – DNI" value={credito.repLegal.dni}/>
-          <InfoRow label="Representante legal – Teléfono" value={credito.repLegal.telefono}/>
-        </>}
-      </div>
-
+      {/* Zona 2 · Datos del establecimiento */}
+      <ZonaPlanilla n="2" titulo="Datos del establecimiento">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:13}}>
+          <InfoRow label="Nombre del establecimiento" value={credito.nombreEstablecimiento}/>
+          <InfoRow label="Ubicación del establecimiento" value={credito.ubicacionEstablecimiento}/>
+          <InfoRow label="Condición de la tenencia" value={credito.tenencia}/>
+          <InfoRow label="N° de RENSPA / RENAPA" value={credito.numeroRenspa}/>
+          <InfoRow label="Principal actividad" value={credito.actividadPrincipal}/>
+          <InfoRow label="Estación del año en que se realiza" value={textoEstaciones(credito.estacionesActividad)}/>
+          <InfoRow label="Estación del año en que tiene los principales egresos" value={textoEstaciones(credito.estacionesEgresos)}/>
+          <InfoRow label="Estación del año en que tiene los principales ingresos" value={textoEstaciones(credito.estacionesIngresos)}/>
+          <InfoRow label="Asociación de productores" value={textoAsociacion(credito.asociadoAsociacion,credito.asociacionNombre)}/>
+        </div>
       {/* Ubicación catastral */}
-      <div style={{border:"1px solid #E4DFCF",borderRadius:8,padding:"10px 14px",marginBottom:14,background:"#fff"}}>
+      <div style={{borderTop:"1px solid #EEE9D9",paddingTop:10,marginTop:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:parcelas.length?8:0,flexWrap:"wrap"}}>
           <div style={{display:"flex",alignItems:"center",gap:6,fontWeight:700,fontSize:13,color:"#23362B"}}><MapPin size={14} color="var(--color-primary)"/>Ubicación catastral</div>
           {isAdmin&&<span className="no-imprimir"><Boton size="sm" variant="outline" icon={MapPin} onClick={()=>setSelectorParcela({soloLectura:false})}>{parcelas.length?"Agregar otra parcela":"Ubicar en parcela catastral"}</Boton></span>}
@@ -1321,6 +1535,30 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
             </div>
           </div>)}
       </div>
+      </ZonaPlanilla>
+
+      {/* Zona 3 · Datos del crédito */}
+      <ZonaPlanilla n="3" titulo="Datos del crédito">
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:13}}>
+          <InfoRow label="Línea" value={linea?.nombre}/>
+          <InfoRow label="Destino" value={destino?.nombre||credito.detalleDestino}/>
+          <InfoRow label="Fecha de otorgamiento" value={fmtDate(credito.fechaOtorgamiento)}/>
+          <InfoRow label="Fecha de contrato" value={fmtDate(credito.fechaContrato)}/>
+          <InfoRow label="Monto otorgado" value={money(credito.monto)}/>
+          <InfoRow label={`Tasa aplicada${credito.esAsociado?" (asociado)":""}`} value={`${credito.tasaAplicada||linea?.tasaFinanciera||20}% anual`}/>
+          <InfoRow label="Contrato" value={credito.numeroContrato}/>
+          <InfoRow label="OPP" value={credito.opp}/>
+          <InfoRow label="Fuente financiamiento" value={credito.fuenteFinanciamiento}/>
+          <InfoRow label="Cuenta cobros" value={linea?.numeroCuenta?`${linea.numeroCuenta} · CBU ${linea.cbu}`:"(no informada)"}/>
+          <InfoRow label="N° de Fs. (rendición)" value={credito.rendicionPresentada?credito.rendicionFs:null}/>
+          <InfoRow label="Fecha de presentación (rendición)" value={credito.rendicionPresentada?fmtDate(credito.rendicionFecha):null}/>
+        </div>
+      </ZonaPlanilla>
+
+      {/* Zona 4 · Seguimiento del crédito (solo Gestor y Consulta) */}
+      {canSeg&&<ZonaPlanilla n="4" titulo="Seguimiento del crédito">
+        <SeguimientoCredito credito={credito} puedeEditar={isAdmin} onUpdate={onUpdate}/>
+      </ZonaPlanilla>}
       {selectorParcela&&<SelectorParcelaModal credito={credito} enfocar={selectorParcela.enfocar}
         soloLectura={selectorParcela.soloLectura} onAsignar={asignarParcela} onClose={()=>setSelectorParcela(null)}/>}
 
@@ -1357,12 +1595,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       {/* Datos editables */}
       {isAdmin&&<><div style={{fontWeight:700,color:"#23362B",fontSize:13.5,marginBottom:10}}>Datos de contrato, contacto y financiamiento</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Campo label="N° de contrato"><input style={iS} value={datos.numeroContrato} onChange={e=>setDatos({...datos,numeroContrato:e.target.value})}/></Campo>
-        <Campo label="Fecha de contrato"><input style={iS} type="date" min="2000-01-01" value={datos.fechaContrato} onChange={e=>setDatos({...datos,fechaContrato:e.target.value})}/></Campo>
-        <Campo label="OPP"><input style={iS} value={datos.opp} onChange={e=>setDatos({...datos,opp:e.target.value})}/></Campo>
-        <Campo label="Fuente de financiamiento"><FuenteInput listId={`f-${credito.id}`} value={datos.fuenteFinanciamiento} onChange={v=>setDatos({...datos,fuenteFinanciamiento:v})}/></Campo>
-        <Campo label="Correo electrónico"><input style={iS} type="email" value={datos.email} onChange={e=>setDatos({...datos,email:e.target.value})}/></Campo>
-        <Campo label="Teléfono"><input style={iS} value={datos.telefono} onChange={e=>setDatos({...datos,telefono:e.target.value})}/></Campo>
+        <div style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#F0ECDD",borderLeft:"4px solid var(--color-primary)",borderRadius:4,marginTop:0}}><ZonaTitulo n="1" titulo="Datos personales"/></div>
         <Campo label="DNI / CUIT"><input style={iS} value={datos.dniCuit} onChange={e=>setDatos({...datos,dniCuit:e.target.value})} placeholder="Ej: 28456123 o 30-71234567-8"/></Campo>
         <Campo label="Domicilio (calle, número, paraje, etc.)">
           <input style={iS} value={datos.domicilio} onChange={e=>setDatos({...datos,domicilio:e.target.value})} placeholder="Ej: Ruta 40 s/n, Lote 14"/>
@@ -1372,6 +1605,16 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
         </Campo>
         <Campo label="Departamento"><SelectDepto value={datos.departamento} onChange={v=>setDatos({...datos,departamento:v})}/></Campo>
         <Campo label="Dirección Regional (manual)"><SelectRegOverride value={datos.regionalOverride} onChange={v=>setDatos({...datos,regionalOverride:v})}/></Campo>
+        <Campo label="Correo electrónico"><input style={iS} type="email" value={datos.email} onChange={e=>setDatos({...datos,email:e.target.value})}/></Campo>
+        <Campo label="Teléfono"><input style={iS} value={datos.telefono} onChange={e=>setDatos({...datos,telefono:e.target.value})}/></Campo>
+        <div style={{gridColumn:"1/-1",height:1,background:"#EEE9D9",margin:"4px 0"}}/>
+        <div style={{gridColumn:"1/-1",fontWeight:600,fontSize:12.5,color:"#5B6B63"}}>Representante legal / apoderado (si corresponde)</div>
+        <Campo label="Nombre"><input style={iS} value={datos.repNombre} onChange={e=>setDatos({...datos,repNombre:e.target.value})}/></Campo>
+        <Campo label="Apellido"><input style={iS} value={datos.repApellido} onChange={e=>setDatos({...datos,repApellido:e.target.value})}/></Campo>
+        <Campo label="DNI"><input style={iS} value={datos.repDni} onChange={e=>setDatos({...datos,repDni:e.target.value})}/></Campo>
+        <Campo label="Teléfono"><input style={iS} value={datos.repTelefono} onChange={e=>setDatos({...datos,repTelefono:e.target.value})}/></Campo>
+
+        <div style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#F0ECDD",borderLeft:"4px solid var(--color-primary)",borderRadius:4,marginTop:4}}><ZonaTitulo n="2" titulo="Datos del establecimiento"/></div>
         <Campo label="Nombre del establecimiento / campo / chacra">
           <input style={iS} value={datos.nombreEstablecimiento} onChange={e=>setDatos({...datos,nombreEstablecimiento:e.target.value})} placeholder="Ej: La Esperanza, Chacra N° 12"/>
         </Campo>
@@ -1384,12 +1627,21 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
             {CONDICIONES_TENENCIA.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
         </Campo>
-        <div style={{gridColumn:"1/-1",height:1,background:"#EEE9D9",margin:"4px 0"}}/>
-        <div style={{gridColumn:"1/-1",fontWeight:600,fontSize:12.5,color:"#5B6B63"}}>Representante legal / apoderado (si corresponde)</div>
-        <Campo label="Nombre"><input style={iS} value={datos.repNombre} onChange={e=>setDatos({...datos,repNombre:e.target.value})}/></Campo>
-        <Campo label="Apellido"><input style={iS} value={datos.repApellido} onChange={e=>setDatos({...datos,repApellido:e.target.value})}/></Campo>
-        <Campo label="DNI"><input style={iS} value={datos.repDni} onChange={e=>setDatos({...datos,repDni:e.target.value})}/></Campo>
-        <Campo label="Teléfono"><input style={iS} value={datos.repTelefono} onChange={e=>setDatos({...datos,repTelefono:e.target.value})}/></Campo>
+        <Campo label="N° de RENSPA / RENAPA">
+          <input style={iS} value={datos.numeroRenspa} onChange={e=>setDatos({...datos,numeroRenspa:e.target.value})} placeholder="Ej: 06.001.0.00001/01"/>
+        </Campo>
+        <Campo label="Principal actividad">
+          <input style={iS} value={datos.actividadPrincipal} onChange={e=>setDatos({...datos,actividadPrincipal:e.target.value})} placeholder="Ej: Cría de ganado ovino, horticultura, forrajeras…"/>
+        </Campo>
+        <EstacionesInput value={datos.estacionesActividad} onChange={v=>setDatos({...datos,estacionesActividad:v})}/>
+        <EstacionesInput titulo="Estación del año en que tiene los principales egresos" value={datos.estacionesEgresos} onChange={v=>setDatos({...datos,estacionesEgresos:v})}/>
+        <EstacionesInput titulo="Estación del año en que tiene los principales ingresos" value={datos.estacionesIngresos} onChange={v=>setDatos({...datos,estacionesIngresos:v})}/>
+        <AsociacionInput valor={datos.asociadoAsociacion} nombre={datos.asociacionNombre} onValor={v=>setDatos({...datos,asociadoAsociacion:v})} onNombre={v=>setDatos({...datos,asociacionNombre:v})}/>
+        <div style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#F0ECDD",borderLeft:"4px solid var(--color-primary)",borderRadius:4,marginTop:4}}><ZonaTitulo n="3" titulo="Datos del crédito"/></div>
+        <Campo label="N° de contrato"><input style={iS} value={datos.numeroContrato} onChange={e=>setDatos({...datos,numeroContrato:e.target.value})}/></Campo>
+        <Campo label="Fecha de contrato"><input style={iS} type="date" min="2000-01-01" value={datos.fechaContrato} onChange={e=>setDatos({...datos,fechaContrato:e.target.value})}/></Campo>
+        <Campo label="OPP"><input style={iS} value={datos.opp} onChange={e=>setDatos({...datos,opp:e.target.value})}/></Campo>
+        <Campo label="Fuente de financiamiento"><FuenteInput listId={`f-${credito.id}`} value={datos.fuenteFinanciamiento} onChange={v=>setDatos({...datos,fuenteFinanciamiento:v})}/></Campo>
       </div>
       <Boton size="sm" icon={Save} onClick={guardarDatos}>Guardar datos</Boton>
       <div style={{height:1,background:"#EEE9D9",margin:"14px 0"}}/></>}
@@ -1549,6 +1801,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
         <div><div style={{color:"#8A8470",fontSize:10}}>TOTAL ADEUDADO</div><div style={{fontFamily:"monospace",fontWeight:700,fontSize:15,color:tots.totalAdeudado>0?"var(--color-danger)":"var(--color-success)"}}>{money(tots.totalAdeudado)}</div></div>
       </div>
 
+      {canObs&&<>
       <div style={{height:1,background:"#EEE9D9",margin:"16px 0"}}/>
 
       {/* Observaciones con fecha */}
@@ -1568,6 +1821,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
         <div style={{flex:1,minWidth:200}}><Campo label="Observación"><textarea rows={2} style={{...iS,resize:"vertical"}} value={nuevaObs.texto} onChange={e=>setNuevaObs({...nuevaObs,texto:e.target.value})} placeholder="Escribí la observación…"/></Campo></div>
         <div style={{paddingTop:20}}><Boton size="sm" icon={Plus} onClick={agregarObs}>Agregar</Boton></div>
       </div>
+      </>}
     </div>
 
     {showMemo&&<MemoModal key={showMemo} tipo={showMemo} credito={credito} linea={linea} tots={tots} config={config} onClose={()=>setShowMemo(null)}/>}
@@ -1582,7 +1836,8 @@ const FORM_INITIAL = {
   fuenteFinanciamiento:"",departamento:"",regionalOverride:"",
   fechaOtorgamiento:"",
   repNombre:"",repApellido:"",repDni:"",repTelefono:"",tieneRepLegal:false,
-  nombreEstablecimiento:"",ubicacionEstablecimiento:"",tenencia:"",
+  nombreEstablecimiento:"",ubicacionEstablecimiento:"",tenencia:"",numeroRenspa:"",
+  actividadPrincipal:"",estacionesActividad:[],estacionesEgresos:[],estacionesIngresos:[],asociadoAsociacion:"",asociacionNombre:"",
 };
 const CONDICIONES_TENENCIA = ["Propietario/a","Arrendatario/a","Comodatario/a","Poseedor/a","Ocupante","Otra"];
 
@@ -1675,6 +1930,13 @@ function NuevoCreditoForm({lineas,onCreate}){
       esAsociado:dcsValidos.some(d=>d.esAsociado),
       tasaAplicada:destinosCredito[0].tasaAplicada,repLegal,
       nombreEstablecimiento:form.nombreEstablecimiento,
+      numeroRenspa:(form.numeroRenspa||"").trim(),
+      actividadPrincipal:(form.actividadPrincipal||"").trim(),
+      estacionesActividad:form.estacionesActividad||[],
+      estacionesEgresos:form.estacionesEgresos||[],
+      estacionesIngresos:form.estacionesIngresos||[],
+      asociadoAsociacion:form.asociadoAsociacion||"",
+      asociacionNombre:form.asociadoAsociacion==="si"?(form.asociacionNombre||"").trim():"",
       ubicacionEstablecimiento:form.ubicacionEstablecimiento,
       tenencia:form.tenencia,
       productor:{nombre:form.nombre,dni:form.dni,domicilio:form.domicilio,ciudad:form.ciudad,email:form.email,telefono:form.telefono},
@@ -1715,6 +1977,12 @@ function NuevoCreditoForm({lineas,onCreate}){
             {CONDICIONES_TENENCIA.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
         </Campo>
+        <Campo label="N° de RENSPA / RENAPA"><input style={iS} value={form.numeroRenspa} onChange={e=>set("numeroRenspa",e.target.value)} placeholder="Ej: 06.001.0.00001/01"/></Campo>
+        <Campo label="Principal actividad"><input style={iS} value={form.actividadPrincipal} onChange={e=>set("actividadPrincipal",e.target.value)} placeholder="Ej: Cría de ganado ovino, horticultura, forrajeras…"/></Campo>
+        <EstacionesInput value={form.estacionesActividad} onChange={v=>set("estacionesActividad",v)}/>
+        <EstacionesInput titulo="Estación del año en que tiene los principales egresos" value={form.estacionesEgresos} onChange={v=>set("estacionesEgresos",v)}/>
+        <EstacionesInput titulo="Estación del año en que tiene los principales ingresos" value={form.estacionesIngresos} onChange={v=>set("estacionesIngresos",v)}/>
+        <AsociacionInput valor={form.asociadoAsociacion} nombre={form.asociacionNombre} onValor={v=>set("asociadoAsociacion",v)} onNombre={v=>set("asociacionNombre",v)}/>
       </div>
 
       <div style={{background:"#F0ECDD",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
@@ -3364,6 +3632,8 @@ function CrecerApp(){
   const[filtroAnio,setFiltroAnio]=useState("TODOS");
   const[filtroFuente,setFiltroFuente]=useState("TODAS");
   const[filtroProximoVencimiento,setFiltroProximoVencimiento]=useState(false);
+  const[filtroSituacion,setFiltroSituacion]=useState("TODAS");
+  const[filtroCiudad,setFiltroCiudad]=useState("TODAS");
   // Estado global de impresión: contenido HTML que se inyecta en #print-area y se imprime
   const[printHTML,setPrintHTML]=useState("");
 
@@ -3457,6 +3727,12 @@ function CrecerApp(){
     const s=new Set(creditosVisibles.map(c=>c.fuenteFinanciamiento).filter(Boolean));
     return Array.from(s).sort();
   },[creditosVisibles]);
+  const ciudadDe=c=>((c.productor&&c.productor.ciudad)||"").trim();
+  const ciudadesDisponibles=useMemo(()=>{
+    const s=new Set(creditosVisibles.map(ciudadDe).filter(Boolean));
+    return Array.from(s).sort((a,b)=>a.localeCompare(b,"es"));
+  },[creditosVisibles]);
+  const haySinCiudad=useMemo(()=>creditosVisibles.some(c=>!ciudadDe(c)),[creditosVisibles]);
 
   const filtradosBase=useMemo(()=>creditosVisibles.filter(c=>{
     const est=calcularEstado(c);
@@ -3466,9 +3742,11 @@ function CrecerApp(){
     if(filtroDestino!=="TODOS"){const lc=lineas.find(l=>l.id===c.lineaId);const dn=lc?(findDestino(lc,c.destinoId)?.nombre||c.detalleDestino):c.detalleDestino;if(dn!==filtroDestino)return false;}
     if(filtroAnio!=="TODOS"&&c.fechaOtorgamiento?.slice(0,4)!==filtroAnio)return false;
     if(filtroFuente!=="TODAS"&&(c.fuenteFinanciamiento||"")!==filtroFuente)return false;
+    if(filtroSituacion!=="TODAS"&&(filtroSituacion==="SIN"?!!c.situacion:c.situacion!==filtroSituacion))return false;
+    if(filtroCiudad!=="TODAS"&&(filtroCiudad==="SIN"?!!ciudadDe(c):ciudadDe(c)!==filtroCiudad))return false;
     if(busqueda.trim()){const q=busqueda.toLowerCase();return c.productor.nombre.toLowerCase().includes(q)||c.expediente.toLowerCase().includes(q)||c.productor.dni.toLowerCase().includes(q);}
     return true;
-  }),[creditosVisibles,busqueda,filtroEstado,filtroRegional,filtroLinea,filtroDestino,filtroAnio,filtroFuente,lineas]);
+  }),[creditosVisibles,busqueda,filtroEstado,filtroRegional,filtroLinea,filtroDestino,filtroAnio,filtroFuente,filtroSituacion,filtroCiudad,lineas]);
 
   // Créditos (no cuotas) que tienen al menos una cuota pendiente venciendo dentro de los próximos 10 días
   const DIAS_PROXIMO_VENCIMIENTO=10;
@@ -3597,7 +3875,7 @@ function CrecerApp(){
             <KpiCard label="Monto total prestado" value={money(tots.prestado)}/><KpiCard label="Monto cobrado" value={money(tots.cobrado)} tone="success"/><KpiCard label="Adeudado en mora" value={money(tots.mora)} tone="danger"/><KpiCard label="Monto no vencido" value={money(tots.noVencido)}/><KpiCard label="Total adeudado" value={money(tots.adeudado)} tone="neutral"/>
           </div>
           <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
-            <Boton size="sm" variant="outline" icon={Printer} onClick={imprimirReporte}>Generar PDF de gráficos y mapa</Boton>
+            <Boton size="sm" variant="outline" icon={Printer} onClick={imprimirReporte}>{user.rol==="productor"?"Generar PDF de gráficos":"Generar PDF de gráficos y mapa"}</Boton>
           </div>
           <div ref={reporteRef}>
           <div className="grafico-print" style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:14,marginBottom:20}}>
@@ -3619,28 +3897,30 @@ function CrecerApp(){
             </div>
           </div>
 
-          {/* Mapa de Chubut por regionales */}
-          <div className="grafico-print" style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,padding:"16px 18px",marginBottom:20}}>
+          {/* Mapa de Chubut por regionales (no se muestra al Productor) */}
+          {user.rol!=="productor"&&<div className="grafico-print" style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,padding:"16px 18px",marginBottom:20}}>
             <div className="grafico-titulo" style={{fontWeight:700,fontSize:13,color:"#23362B",marginBottom:12}}>Distribución por Dirección Regional — Chubut</div>
             <MapaChubutRegional datos={datosReg} tots={tots} tema={tema} creditos={filtrados} onAbrirCredito={setSelected}/>
-          </div>
+          </div>}
           </div>
 
           {/* Filtros */}
           <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
             <div style={{position:"relative",flex:"1 1 200px"}}><Search size={13} style={{position:"absolute",left:9,top:11,color:"#9A9482"}}/><input style={{...iS,paddingLeft:28}} placeholder="Buscar productor, DNI o expediente…" value={busqueda} onChange={e=>setBusqueda(e.target.value)}/></div>
             <select style={{...iS,width:148}} value={filtroEstado} onChange={e=>setFiltroEstado(e.target.value)}><option value="TODOS">Todos los estados</option><option value="AL_DIA">Al día</option><option value="MORA">En mora</option><option value="CANCELADO">Cancelado</option></select>
-            <select style={{...iS,width:178}} value={filtroRegional} onChange={e=>setFiltroRegional(e.target.value)}><option value="TODAS">Todas las regionales</option>{REGIONALES_LISTA.map(r=><option key={r} value={r}>{REGIONALES_NOMBRE[r]}</option>)}<option value="Sin asignar">Sin asignar</option></select>
+            {user.rol!=="productor"&&user.rol!=="viewer_regional"&&<select style={{...iS,width:178}} value={filtroRegional} onChange={e=>setFiltroRegional(e.target.value)}><option value="TODAS">Todas las regionales</option>{REGIONALES_LISTA.map(r=><option key={r} value={r}>{REGIONALES_NOMBRE[r]}</option>)}<option value="Sin asignar">Sin asignar</option></select>}
             <select style={{...iS,width:160}} value={filtroLinea} onChange={e=>{setFiltroLinea(e.target.value);setFiltroDestino("TODOS");}}><option value="TODAS">Todas las líneas</option>{lineas.map(l=><option key={l.id} value={l.id}>{l.nombre}</option>)}</select>
             <select style={{...iS,width:160}} value={filtroDestino} onChange={e=>setFiltroDestino(e.target.value)}><option value="TODOS">Todos los destinos</option>{destDisponibles.map(d=><option key={d} value={d}>{d}</option>)}</select>
             <select style={{...iS,width:100}} value={filtroAnio} onChange={e=>setFiltroAnio(e.target.value)}><option value="TODOS">Todos los años</option>{aniosDisponibles.map(a=><option key={a} value={a}>{a}</option>)}</select>
-            <select style={{...iS,width:190}} value={filtroFuente} onChange={e=>setFiltroFuente(e.target.value)}><option value="TODAS">Todas las fuentes</option>{fuentesDisponibles.map(f=><option key={f} value={f}>{f}</option>)}</select>
+            {user.rol!=="productor"&&user.rol!=="viewer_regional"&&<select style={{...iS,width:190}} value={filtroFuente} onChange={e=>setFiltroFuente(e.target.value)}><option value="TODAS">Todas las fuentes</option>{fuentesDisponibles.map(f=><option key={f} value={f}>{f}</option>)}</select>}
+            <select style={{...iS,width:186}} value={filtroSituacion} onChange={e=>setFiltroSituacion(e.target.value)}><option value="TODAS">Todas las situaciones</option>{SITUACIONES.map(s=><option key={s.id} value={s.id}>{s.punto} {s.label}</option>)}<option value="SIN">⚪ Sin definir</option></select>
+            {user.rol!=="productor"&&<select style={{...iS,width:170}} value={filtroCiudad} onChange={e=>setFiltroCiudad(e.target.value)}><option value="TODAS">Todas las ciudades</option>{ciudadesDisponibles.map(x=><option key={x} value={x}>{x}</option>)}{haySinCiudad&&<option value="SIN">Sin ciudad</option>}</select>}
           </div>
 
           <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}>
-                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th><th style={TH}>Ubicación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
+                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th>{user.rol!=="productor"&&<th style={TH}>Ciudad</th>}<th style={TH}>Situación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
               </tr></thead>
               <tbody>{filtrados.map(c=>{
                 const lc=lineas.find(l=>l.id===c.lineaId),dt=lc&&findDestino(lc,c.destinoId),reg=getRegional(c);
@@ -3648,14 +3928,8 @@ function CrecerApp(){
                   <td style={TD}>{c.expediente}</td><td style={TD}>{c.productor.nombre}</td>
                   <td style={TD}>{dt?.nombre||c.detalleDestino}</td>
                   <td style={TD}>{reg==="Sin asignar"?<span style={{color:"#B0AA94"}}>Sin asignar</span>:reg}</td>
-                  <td style={TD}>{(c.parcelas||[]).length===0?<span style={{color:"#B0AA94"}}>Sin ubicar</span>:
-                    <span title={c.parcelas.map(describirParcela).join("\n")} style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
-                      <MapPin size={11} color={c.parcelas[0].tipo==="punto"?"#8A8470":"var(--color-primary)"}/>
-                      {c.parcelas[0].tipo==="punto"?"Punto":c.parcelas[0].chacra?`Chacra ${c.parcelas[0].chacra}`:"Parcela"}
-                      {c.parcelas[0].renspa&&<span style={{fontFamily:"monospace",fontSize:10.5,color:"#5B6B63"}}>{c.parcelas[0].renspa}</span>}
-                      {c.parcelas.length>1&&<span style={{color:"#8A8470"}}>+{c.parcelas.length-1}</span>}
-                    </span>}
-                  </td>
+                  {user.rol!=="productor"&&<td style={TD}>{ciudadDe(c)||<span style={{color:"#B0AA94"}}>-</span>}</td>}
+                  <td style={TD}><SituacionBadge valor={c.situacion} corto/></td>
                   <td style={{...TD,fontFamily:"monospace"}}>{money(c.monto)}</td>
                   <td style={TD}>{fmtDate(c.fechaOtorgamiento)}</td>
                   <td style={TD}><EstadoBadge estado={calcularEstado(c)}/></td>
@@ -3663,7 +3937,7 @@ function CrecerApp(){
                   <td style={{...TD,color:"#9A9482"}}><ChevronRight size={15}/></td>
                 </tr>;
               })}
-              {filtrados.length===0&&<tr><td colSpan={10}style={{...TD,textAlign:"center",color:"#9A9482",padding:28}}>No hay créditos que coincidan con los filtros.</td></tr>}
+              {filtrados.length===0&&<tr><td colSpan={user.rol==="productor"?10:11} style={{...TD,textAlign:"center",color:"#9A9482",padding:28}}>No hay créditos que coincidan con los filtros.</td></tr>}
               </tbody>
             </table>
           </div>
