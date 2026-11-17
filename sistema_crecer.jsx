@@ -37,7 +37,7 @@ Rawson, {fecha_actual}
 
 Señor/a Director/a:
 
-Por medio de la presente me dirijo a Ud. a fin de informar que el/la Sr./Sra. {nombre} (DNI/CUIT: {dni}), domiciliado/a en {domicilio}, ha sido beneficiario/a de un crédito en el marco de la línea "{linea}", Destino "{destino}", bajo el Expediente N° {expediente} - Contrato N° {contrato}, por un monto total de {monto}, otorgado el {fecha_otorgamiento}, correspondiente a la {regional}.
+Por medio de la presente me dirijo a Ud. a fin de informar que {el_la} {tratamiento} {nombre} (DNI/CUIT: {dni}), {domiciliado} en {domicilio}, ha sido {beneficiario_min} de un crédito en el marco de la línea "{linea}", Destino "{destino}", bajo el Expediente N° {expediente} - Contrato N° {contrato}, por un monto total de {monto}, otorgado el {fecha_otorgamiento}, correspondiente a la {regional}.
 
 El cronograma de cuotas es el siguiente:
 
@@ -60,7 +60,7 @@ Rawson, {fecha_actual}
 
 Señor/a Jefe/a del Departamento de Tesorería:
 
-Por medio de la presente me dirijo a Ud. a fin de elevar a su conocimiento el pago efectuado por el/la Sr./Sra. {nombre} (DNI/CUIT: {dni}), domiciliado/a en {domicilio}, correspondiente al crédito bajo el Expediente N° {expediente} - Contrato N° {contrato}, línea "{linea}", Destino "{destino}", correspondiente a la {regional}.
+Por medio de la presente me dirijo a Ud. a fin de elevar a su conocimiento el pago efectuado por {el_la} {tratamiento} {nombre} (DNI/CUIT: {dni}), {domiciliado} en {domicilio}, correspondiente al crédito bajo el Expediente N° {expediente} - Contrato N° {contrato}, línea "{linea}", Destino "{destino}", correspondiente a la {regional}.
 
 Se solicita la verificación del pago informado, cuyo detalle se acompaña a continuación:
 
@@ -82,7 +82,7 @@ Rawson, {fecha_actual}
 
 Señor/a Jefe/a del Departamento de Tesorería:
 
-Por medio de la presente me dirijo a Ud. a fin de solicitar que, atento a la cancelación total del crédito otorgado al/a la Sr./Sra. {nombre} (DNI/CUIT: {dni}), domiciliado/a en {domicilio}, en el marco de la línea "{linea}", Destino "{destino}", Expediente N° {expediente} - Contrato N° {contrato} de fecha {fecha_contrato}, correspondiente a la {regional}, se proceda a la restitución de la garantía oportunamente constituida, una vez verificada la firma correspondiente.
+Por medio de la presente me dirijo a Ud. a fin de solicitar que, atento a la cancelación total del crédito otorgado {al_la} {tratamiento} {nombre} (DNI/CUIT: {dni}), {domiciliado} en {domicilio}, en el marco de la línea "{linea}", Destino "{destino}", Expediente N° {expediente} - Contrato N° {contrato} de fecha {fecha_contrato}, correspondiente a la {regional}, se proceda a la restitución de la garantía oportunamente constituida, una vez verificada la firma correspondiente.
 
 Monto total cancelado: {total_general}
 Fecha de otorgamiento del crédito: {fecha_otorgamiento}
@@ -99,6 +99,15 @@ const MEMO_TITULOS = {
   contable:"Nota a Dirección Administrativa Contable",
   tesoreriaPago:"Nota a Tesorería – Pago a verificar",
   tesoreriaGarantia:"Nota a Tesorería – Devolución de garantía",
+  intimacion:"Nota de Intimación – Reclamo de deuda",
+  contrato:"Contrato de Mutuo",
+  libreDeuda:"Certificado de Libre Deuda",
+  cronograma:"Cronograma de cuotas",
+  registro:"Nota de Registro de Contrato",
+  regionalFirma:"Nota Regional Firma",
+  directoEntrega:"Nota Directo Entregar Contrato",
+  memoOpp:"MEMO OPP",
+  cartaDocumento:"Carta Documento",
 };
 
 // ─── Datos por defecto ───────────────────────────────────────────────────────
@@ -142,8 +151,6 @@ const DEFAULT_LINEAS = [{
 }];
 
 const DEFAULT_USUARIOS = [
-  { usuario:"admin", clave:"admin", nombre:"Administrador del Sistema", rol:"admin" },
-  { usuario:"consulta", clave:"consulta", nombre:"Usuario de Consulta", rol:"viewer" },
 ];
 
 // Paleta oficial "Chubut Provincia · Brand Guidelines V1.3" (Dic. 2023):
@@ -187,6 +194,8 @@ const DEFAULT_CONFIG = {
   membreteDir2:"Rawson - Chubut",
   membreteTel:"(02804) 484125 /126",
   membreteEmail:"creditoschubut@gmail.com",
+  copiaAuto:{activa:true},
+  autoridades:{ministro:"",subsecretario:"",directorNorte:"",directorMeseta:"",directorSur:"",directorOeste:"",directorAdministrativo:""},
 };
 
 const DEPARTAMENTOS = [
@@ -277,7 +286,10 @@ const ESTADO_LABELS = { CANCELADO:"Cancelado", AL_DIA:"Al día", MORA:"En mora",
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const r2 = (n) => Math.round((n+Number.EPSILON)*100)/100;
-const todayStr = () => new Date().toISOString().slice(0,10);
+let FECHA_CORTE_OVERRIDE=null;
+const todayStr = () => FECHA_CORTE_OVERRIDE || new Date().toISOString().slice(0,10);
+// Total adeudado (saldo + intereses moratorios y punitorios) calculado a una fecha dada
+function totalesAFecha(credito,linea,iso){ FECHA_CORTE_OVERRIDE=iso; try{ return calcularTotalesCredito(credito,linea); } finally { FECHA_CORTE_OVERRIDE=null; } }
 function addMonths(d,m){ const x=new Date(d+"T00:00:00"); x.setMonth(x.getMonth()+m); return x.toISOString().slice(0,10); }
 function addDays(d,n){ const x=new Date(d+"T00:00:00"); x.setDate(x.getDate()+n); return x.toISOString().slice(0,10); }
 function fmtDate(d){ if(!d)return"-"; const[y,m,dd]=d.split("-"); return`${dd}/${m}/${y}`; }
@@ -291,7 +303,12 @@ function infoDeCiudad(ciudad){
   return{departamento:dep,regional};
 }
 function findDestino(linea,id){ return linea?.destinos?.find(d=>d.id===id); }
-function getTasas(linea){ return{mora:linea?.tasaMora??15,punitorio:linea?.tasaPunitorio??15}; }
+function numOrNull(v){const x=parseFloat(v);return isFinite(x)?x:null;}
+// Mora y punitorio: los del crédito si se cargaron; si no, los de la línea.
+function getTasas(linea,credito){
+  const m=numOrNull(credito?.tasaMora), p=numOrNull(credito?.tasaPunitoria);
+  return{mora:m??(linea?.tasaMora??15),punitorio:p??(linea?.tasaPunitorio??15)};
+}
 function shade(hex,p){
   if(!hex||hex[0]!=="#")return hex;
   const f=parseInt(hex.slice(1),16),t=p<0?0:255,abs=Math.abs(p);
@@ -468,7 +485,7 @@ function calcularFilas(credito, tasas) {
 
 // Totales resumidos de un crédito (capital, interés, mora, cobrado, deuda total)
 function calcularTotalesCredito(credito, linea) {
-  return totalizarFilas(calcularFilas(credito, getTasas(linea)));
+  return totalizarFilas(calcularFilas(credito, getTasas(linea,credito)));
 }
 
 // Totaliza un cronograma ya calculado. Separa lo DEVENGADO de mora/punitorio
@@ -506,6 +523,42 @@ function estadoFila(f) {
   return"PENDIENTE";
 }
 
+// Situación automática según Emergencia y Condonación (50 % o 100 %).
+// Solo cambia cuando el campo cambia; si el Gestor eligió otra situación, se respeta.
+function condonadoSit(p){return p==="100"?"condonado100":p==="50"?"condonado50":null;}
+function situacionTrasCambio(prev,next){
+  let s=prev.situacion;
+  if(next.emergencia==="si"&&prev.emergencia!=="si")s="emergencia";
+  else if(next.emergencia!=="si"&&prev.emergencia==="si"&&s==="emergencia")s=null;
+  const esCond=x=>x==="condonado50"||x==="condonado100";
+  if(next.condonacion==="si"&&condonadoSit(next.porcentaje)&&(prev.condonacion!=="si"||prev.porcentaje!==next.porcentaje))s=condonadoSit(next.porcentaje);
+  else if(next.condonacion!=="si"&&prev.condonacion==="si"&&esCond(s))s=null;
+  return s;
+}
+// Fecha en que el crédito quedó cancelado: la fecha del último pago registrado.
+// Si el crédito figura como Condonado 100 %, la fecha de la condonación.
+function cancelacionISO(credito){
+  const est=estadoFinal(credito);
+  if(est==="CANCELADO"){
+    const f=[];
+    (credito.cuotas||[]).forEach(q=>(q.pagos||[]).forEach(p=>{if(p.fecha)f.push(p.fecha);}));
+    f.sort();
+    return f.length?f[f.length-1]:"";
+  }
+  if(est==="CONDONADO")return credito.fechaCondonacion||"";
+  return "";
+}
+function fechaCancelacion(credito){const f=cancelacionISO(credito);return f?fmtDate(f):"-";}
+// Estado que se muestra en la columna Estado y en la alerta de la planilla.
+// Un crédito condonado al 100 % figura como Condonado (salvo que ya esté cancelado).
+function estadoFinal(credito){
+  const e=calcularEstado(credito);
+  if(e==="CANCELADO")return e;
+  if(credito&&credito.condonacion==="si"&&credito.porcentajeCondonacion==="100")return "CONDONADO";
+  // Crédito cargado que todavía no tiene fecha de contrato: en trámite
+  if(credito&&!credito.fechaContrato)return "EN_TRAMITE";
+  return e;
+}
 function calcularEstado(credito) {
   if(credito.canceladoManual)return"CANCELADO";
   const q=credito.cuotas||[];
@@ -524,8 +577,332 @@ function normalizarObs(obs) {
 }
 
 // Construye texto de una nota dado el tipo, crédito, línea y totales
+// Nota de intimación (modelo 2026): carta de reclamo de deuda con el membrete oficial.
+const MEMO_INTIMACION_DEFAULT = `Rawson, {fecha_actual}
+
+{a_art}
+{tratamiento} {nombre}
+{localidad} - Chubut
+
+Ref: Expediente N.º {expediente}
+{productor_rol}: {nombre}
+Reclamo de deuda
+
+De mi mayor consideración;
+\u2003\u2003Por medio de la presente, nos ponemos en contacto con Ud., desde la Dirección de Financiamiento dependiente del Ministerio de Producción, en relación del Contrato de Mutuo suscripto el {fecha_contrato} en el marco de la línea de crédito “{linea}”.-
+\u2003\u2003Al revisar el estado de su cuenta, notamos que nos figura en deuda a la fecha, por lo que le pedimos que se ponga en contacto con nosotros a la brevedad para regularizar su situación.
+\u2003\u2003Para el caso de que ya hubiera realizado el pago o si está atravesando alguna dificultad que le impida regularizar la situación en este momento, le solicitamos que se comunique con nosotros a la brevedad para rever la situación a los siguientes canales de comunicación: Teléfono fijo 280-4484125, interno 125/145 - Whats App 280-4276775 (solo msj de texto) - domicilio electrónico: creditoschubut@gmail.com o dirigirse en forma personal a la oficina más cercana de su domicilio del Ministerio de Producción, de lo contrario el trámite continuará con el procedimiento de cobro correspondiente.
+\u2003\u2003Quedamos a su disposición ante cualquier consulta, desde ya, muchas gracias.
+\u2003\u2003Sin otro particular, saludamos a Ud. atentamente.
+
+
+NOTA N° ____ /{anio_corto} – DF-MP`;
+
+// ── Contrato de mutuo: importes en letras y formato ──────────────────────────
+function numLetras(n){
+  n=Math.round(Number(n)||0); if(n===0)return "CERO";
+  const U=["","UN","DOS","TRES","CUATRO","CINCO","SEIS","SIETE","OCHO","NUEVE","DIEZ","ONCE","DOCE","TRECE","CATORCE","QUINCE","DIECISÉIS","DIECISIETE","DIECIOCHO","DIECINUEVE","VEINTE"];
+  const V=["","VEINTIÚN","VEINTIDÓS","VEINTITRÉS","VEINTICUATRO","VEINTICINCO","VEINTISÉIS","VEINTISIETE","VEINTIOCHO","VEINTINUEVE"];
+  const T=["","","","TREINTA","CUARENTA","CINCUENTA","SESENTA","SETENTA","OCHENTA","NOVENTA"];
+  const C=["","CIENTO","DOSCIENTOS","TRESCIENTOS","CUATROCIENTOS","QUINIENTOS","SEISCIENTOS","SETECIENTOS","OCHOCIENTOS","NOVECIENTOS"];
+  const dec=x=>{ if(x<=20)return U[x]; if(x<30)return V[x-20]; const d=Math.floor(x/10),u=x%10; return u?T[d]+" Y "+U[u]:T[d]; };
+  const cen=x=>{ if(x===0)return ""; if(x===100)return "CIEN"; const h=Math.floor(x/100),r=x%100; return (C[h]+(r?" "+dec(r):"")).trim(); };
+  const mil=x=>{ const k=Math.floor(x/1000),r=x%1000; let s=""; if(k)s=(k===1?"MIL":cen(k)+" MIL"); if(r)s+=(s?" ":"")+cen(r); return s; };
+  let out=""; const M=Math.floor(n/1000000), R=n%1000000;
+  if(M)out=(M===1?"UN MILLÓN":mil(M)+" MILLONES");
+  if(R)out+=(out?" ":"")+mil(R);
+  return out;
+}
+function fmtInt(n){return String(Math.round(Number(n)||0)).replace(/\B(?=(\d{3})+(?!\d))/g,".");}
+// Contrato de mutuo (modelo CONTRATO 2449-26). Se imprime en hoja oficio con el membrete.
+const MEMO_CONTRATO_DEFAULT = `CONTRATO DE MUTUO
+
+Entre el Ministerio de Producción con domicilio en la calle 9 de Julio N° 280 de la ciudad de Rawson, Provincia del Chubut, representado por su Ministro, Señor Julio Basilio KRESTEFF, Documento Nacional de Identidad Nº 18.065.066, en adelante EL MINISTERIO, por una parte, y por la otra {el_la} {senor} {nombre}, Documento Nacional de Identidad Nº {dni}, con domicilio en {domicilio}, de la ciudad de {localidad}, Provincia del Chubut, en adelante {beneficiario_art}, convienen en celebrar el presente contrato en el marco de la línea de crédito “{linea}”, el que se regirá de conformidad con las siguientes cláusulas y condiciones:
+
+PRIMERA: EL MINISTERIO otorga a {beneficiario_art}, y {este} acepta, un préstamo por la suma de PESOS {monto_letras} ($ {monto_pesos}), en el marco del destino {destino}, que se tramitó bajo Expediente Nº {expediente}, conforme el objeto establecido en la solicitud de crédito oportunamente presentada.
+
+SEGUNDA: {beneficiario_art} se compromete a devolver la suma de pesos detallada en la cláusula antecedente más los intereses compensatorios correspondientes y según las condiciones que a continuación se detallan:
+
+Plazo de Amortización: {plazo_texto}.
+Cuotas: Se abona en {cantidad_cuotas} cuotas trimestrales a partir del tercer mes de la fecha de otorgamiento del crédito, venciendo éstas el mismo número de día que se suscribió el presente contrato, de acuerdo a los montos que a continuación se detallan:
+[[CRONOGRAMA]]
+Pago de interés: Trimestral, conforme las facilidades de devolución establecidas como consecuencia de los ciclos productivos que posee el proyecto a financiar a través del “Créditos al Campos y Emprendimientos Rurales (CRECER)”.
+Tasa de interés financiero: {tasa_financiera} % anual.
+Tasa de interés por mora: {tasa_mora} % anual.
+Tasa de interés punitorio: {tasa_punitorio} % anual.
+Los importes especificados deberán ser abonados mediante depósito en el Banco del Chubut S.A., Oficina operativa Rawson o sus Sucursales, en la cuenta corriente Nº {cuenta_cobro} (CBU N° {cbu}), a la orden de Tesorería General de la Provincia de Chubut, debiendo remitir copia fotostática de la constancia de depósito a la Tesorería de la Subsecretaria de Financiamiento y Comercio para la Producción del Ministerio de Producción.
+
+TERCERA: {beneficiario_art} se obliga a efectuar ante EL MINISTERIO la rendición de la inversión realizada, mediante documentación fehaciente que acredite la inversión de los fondos, conforme el objetivo aprobado, acorde a las normas impositivas vigentes. La misma deberá hacerse efectiva dentro de un plazo no mayor a NOVENTA (90) días corridos, contados a partir de la fecha del otorgamiento del presente préstamo.
+
+CUARTA: Si en el plazo establecido en la cláusula anterior, no se hubiere realizado la rendición total el préstamo otorgado, {beneficiario_art} se obliga a reintegrar a EL MINISTERIO en forma inmediata el capital otorgado, con más los intereses pactados en la cláusula segunda del presente.
+
+QUINTA: En caso de rendición parcial de los montos otorgados, {beneficiario_art} deberá reintegrar a EL MINISTERIO en forma inmediata el capital no rendido, con más los intereses pactados en la cláusula segunda del presente.
+
+SEXTA: Para el caso de incumplimiento por parte de {beneficiario_art} a cualquiera de las obligaciones emergentes del presente contrato, inclusive el pago en término de capital e intereses, EL MINISTERIO se reserva la facultad de exigir el pago de los intereses que se mencionan en la cláusula segunda, o de resolver el presente por incumplimiento, y de llevar a cabo mediante el organismo pertinente la ejecución en forma judicial de la garantía que se rubrica en este acto en caución del fiel cumplimiento de este contrato.
+
+SÉPTIMA: Se conviene que el vencimiento de todos y cada uno de los plazos que se mencionan en el presente contrato, producirán la mora de pleno derecho sin necesidad de interpelación judicial o extrajudicial de naturaleza alguna.
+
+OCTAVA: {beneficiario_art} se compromete a permitir el ingreso de funcionarios de EL MINISTERIO al predio con el fin de realizar auditorías, respecto de la utilización de los fondos otorgados por dicha institución.
+
+NOVENA: {beneficiario_art} presta conformidad con la publicación de los datos crediticios en la Central de Deudores del Sistema Financiero que administra el Banco Central de la República Argentina.
+
+DECIMA: Para el caso en que se comprobare que el crédito otorgado ha tenido un destino distinto al previsto, se iniciarán las acciones legales correspondiente tendientes al cobro del dinero adeudado, para lo cual serán considerados vencidos todos los plazos, con más de los intereses que se pactan en la Cláusula SEGUNDA, quedando inhabilitado {beneficiario_art} para acceder en lo futuro a toda otra operatoria que brinde EL MINISTERIO.
+
+DECIMA PRIMERA: A todo evento las partes constituyen domicilio en los lugares que se mencionan en el introito del presente, donde tendrán validez todas las notificaciones a que hubiere lugar, sometiéndose expresamente a la Competencia Ordinaria de los Tribunales de la Circunscripción Judicial Rawson de la Provincia del Chubut, con asiento en la ciudad de Rawson, haciendo expresa renuncia a todo otro fuero o jurisdicción que les pudiera corresponder.
+
+No siendo para más, y luego de la lectura y ratificación de estilo del presente en todas sus cláusulas, se firman los ejemplares de ley de un mismo tenor y a un solo efecto recibiendo cada parte el suyo, en la ciudad de Rawson, Provincia del Chubut, a los ____ días del mes de ________ del año {anio}.
+
+
+_____________________                          ______________________
+{beneficiario_art}                                EL MINISTERIO
+[[SALTO]]
+PAGARÉ
+
+VTO.: _______/___________/________.-                    POR: $ {total_general}. -
+
+RAWSON, CHUBUT________________ de ___________________ de _______________.-
+
+El día ______ de ____________ de ________ PAGARÉ sin protesto (art. 50 D. Ley 5965/63) al Ministerio de Producción (MP), o a su orden la cantidad de PESOS {total_letras}, o por igual valor recibido en préstamo a mi entera satisfacción.
+
+Pagadero en calle 9 de Julio N° 280 de la Ciudad de Rawson, Provincia del Chubut.-FIRMANTE: {nombre} (DNI Nº {dni})
+DOMICILIO: {domicilio}.-
+CIUDAD: {localidad}.-
+PROVINCIA: CHUBUT.-
+
+……………………………………FIRMANTE`;
+
+// Cuotas del contrato, tomadas del cronograma de la planilla (sección "Cronograma de cuotas e intereses"):
+// una línea por cuota con el total de esa cuota (capital + interés), en el formato del modelo.
+function cuotasContratoFilas(credito,linea){
+  return calcularFilas(credito,getTasas(linea,credito)).map(f=>r2((f.cap?.monto||0)+(f.int?.monto||0))).filter(t=>t>0);
+}
+function cronogramaContratoHtml(credito,linea){
+  return cuotasContratoFilas(credito,linea).map((t,i)=>`<div>${i+1}- PESOS ${numLetras(t)} ($ ${fmtInt(t)}.-)</div>`).join("");
+}
+// Certificado de libre deuda (modelo LIBRE DE DEUDA). Se imprime con el membrete oficial.
+const MEMO_LIBRE_DEFAULT = `RAWSON (Ch), {fecha_larga}
+
+{senor_art}: {nombre}
+{localidad} - Chubut
+
+Referencia: Expediente N.º {expediente} – Contrato N.º {numero_contrato} – Línea de Crédito “{linea}”
+
+Por medio del presente, se deja constancia de que el crédito otorgado {al_la} {tratamiento} {nombre}, con fecha {fecha_otorgamiento}, en el marco de la Línea de Crédito “{linea}”, por la suma de PESOS {monto_letras} ($ {monto_pesos}), instrumentado mediante el Contrato N.º {numero_contrato} y tramitado por Expediente Nº {expediente}, ha sido cancelado en su totalidad, conforme las constancias obrantes en las actuaciones administrativas y los registros correspondientes.
+
+En virtud de ello, verificada la cancelación de las obligaciones exigibles derivadas de la operación crediticia identificada precedentemente, se certifica que el beneficiario no registra saldo de deuda pendiente respecto del crédito referido, a la fecha de emisión del presente.
+
+Asimismo, se deja constancia de que, en garantía de la operación, se suscribió un pagaré por la suma de PESOS {total_letras} ($ {total_general}), cuya devolución se efectuará conforme al procedimiento administrativo correspondiente, una vez verificada la cancelación de las obligaciones garantizadas.
+
+Se extiende el presente “CERTIFICADO DE LIBRE DEUDA” para su entrega al interesado y para los efectos administrativos que correspondan.
+
+Atentamente.
+
+
+CERTIFICADO DE LIBRE DEUDA N.º ____/{anio}   DPyF–Ss.FyCP-MP`;
+
+// Nota con cronograma de cuotas (modelo "Nota acompaña contrato"). El cuadro sale del cronograma de la planilla.
+const MEMO_CRONOGRAMA_DEFAULT = `Rawson, {fecha_larga}
+
+{senor} {nombre}
+{domicilio}
+{localidad} - Chubut:
+
+Ref: Acompaña contrato original
+
+Por medio de la presente me dirijo a Ud. con el fin de remitir contrato original firmado el día {fecha_contrato}, en el marco del crédito que se tramitó en el Expte. {expediente} y los fondos fueron transferidos a su cuenta el día {fecha_otorgamiento}.
+Asimismo, aprovecho la oportunidad de recordar las siguientes consideraciones:
+
+RENDICIÓN:
+Según la CLÁUSULA TERCERA: la fecha límite para presentar la rendición es el día {fecha_rendicion_limite}, mediante documentación fehaciente que acredite la inversión de los fondos, conforme el objetivo aprobado, acorde a las normas impositivas vigentes (boletas A, B o C, siempre que estén homologas por la AFIP).
+
+CUOTAS Y VENCIMIENTOS:
+[[CRONOGRAMA_NOTA]]
+Por último, cabe destacar, que los pagos los debe realizar en sucursal del Banco del Chubut S.A. a la cuenta {cuenta_cobro} o transferencia al CBU: {cbu}, una vez realizado el pago deberá remitir a la oficina más cercana del Ministerio de Producción y/o por correo a la dirección creditoschubut@gmail.com y/o por WhatsApp al número 280-4276775.
+
+Atentamente,
+
+
+Nota N° ________ /{anio_corto} DPyF-DF-SsFCP-MP`;
+
+// Cuadro de cuotas de la nota: fecha de transferencia y, por cuota, el total y el vencimiento de la planilla
+function cronogramaNotaHtml(credito,linea){
+  const filas=calcularFilas(credito,getTasas(linea,credito)).map(f=>({t:r2((f.cap?.monto||0)+(f.int?.monto||0)),v:f.fechaVencimiento})).filter(x=>x.t>0);
+  const fT=credito.fechaOtorgamiento||"";
+  const td="border:1px solid #000;padding:2px 8px;font-size:10pt;";
+  const cuerpo=filas.map((x,i)=>`<tr><td style="${td}text-align:center;">N° ${i+1}</td><td style="${td}text-align:right;">${money(x.t)}</td><td style="${td}text-align:center;">${fmtDate(x.v)}</td></tr>`).join("");
+  return `<table style="border-collapse:collapse;margin:6pt auto;width:62%;"><tr><td colspan="2" style="${td}background:#F8CBAD;text-align:center;">Fecha de otorgamiento:</td><td style="${td}background:#F8CBAD;text-align:center;">${fmtDate(fT)}</td></tr><tr><td style="${td}text-align:center;">Cuota</td><td style="${td}text-align:center;">Monto</td><td style="${td}text-align:center;">Vencimiento</td></tr>${cuerpo}</table>`;
+}
+// Adecua el género del contrato (cualquier mayúscula o minúscula, también en plantillas guardadas con texto fijo)
+// Separa y une "Apellido, Nombre" (el sistema guarda el nombre completo en un solo campo)
+function splitNombre(n){const s=String(n||""); const i=s.indexOf(","); if(i<0)return{apellido:s.trim(),nombre:""}; return{apellido:s.slice(0,i).trim(),nombre:s.slice(i+1).trim()};}
+function unirNombre(ap,no){const a=(ap||"").trim(), n=(no||"").trim(); return n?(a+", "+n):a;}
+// "APELLIDO, Nombre" -> "Nombre APELLIDO" (en las notas y el contrato)
+function nombreNatural(n){
+  const s=String(n||""); const i=s.indexOf(",");
+  if(i<0)return s;
+  return (s.slice(i+1).trim()+" "+s.slice(0,i).trim()).trim();
+}
+// Adecua el género en el texto del contrato (ignora etiquetas de formato y respeta mayúsculas)
+function generoContrato(texto,g){
+  if(g!=="F"&&g!=="M")return texto;
+  const F=g==="F";
+  const pre="(?<![A-Za-zÁÉÍÓÚÑáéíóúñ])";
+  const fin="(?![A-Za-zÁÉÍÓÚÑáéíóúñ])";
+  const sep="(?:\\s|&nbsp;|<[^>]+>)+";
+  const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const limpio=s=>s.replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/\s+/g," ").trim();
+  const capWord=w=>w.charAt(0).toUpperCase()+w.slice(1);
+  const casar=(match,destino)=>{
+    const pl=limpio(match);
+    if(pl===pl.toUpperCase()&&pl!==pl.toLowerCase())return destino.toUpperCase();
+    const toks=pl.split(" ");
+    const esMay=s=>s.length>0&&s[0]===s[0].toUpperCase()&&s[0]!==s[0].toLowerCase();
+    return destino.split(" ").map((w,i)=>{
+      const base=w.replace(/\.$/,"");
+      const cap=(i===0&&esMay(pl))||toks.some(t=>{const tb=t.replace(/\.$/,""); return esMay(tb)&&base.length>=2&&tb.slice(0,2).toLowerCase()===base.slice(0,2).toLowerCase();});
+      return cap?capWord(w):w;
+    }).join(" ");
+  };
+  const pares=F?[
+    ["el señor","la señora"],["el sr.","la sra."],["el beneficiario","la beneficiaria"],
+    ["el/la sr./sra.","la sra."],["al/a la sr./sra.","a la sra."],["domiciliado/a","domiciliada"],["productor/a","productora"],
+    ["al","a la",sep+"(?=sra?\\.)"],["sr.","sra.",sep+"(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ])"],
+    ["inhabilitado","inhabilitada",sep+"(?=(?:la|LA|La)"+sep+"(?:beneficiaria|BENEFICIARIA|Beneficiaria))"],
+    ["éste","ésta",sep+"(?=acepta)"],["este","esta",sep+"(?=acepta)"]
+  ]:[
+    ["la señora","el señor"],["la sra.","el sr."],["la beneficiaria","el beneficiario"],
+    ["el/la sr./sra.","el sr."],["al/a la sr./sra.","al sr."],["domiciliado/a","domiciliado"],["productor/a","productor"],
+    ["a la","al",sep+"(?=sra?\\.)"],["sra.","sr.",sep+"(?=[A-ZÁÉÍÓÚÑ][a-záéíóúñ])"],
+    ["inhabilitada","inhabilitado",sep+"(?=(?:el|EL|El)"+sep+"(?:beneficiario|BENEFICIARIO|Beneficiario))"],
+    ["ésta","éste",sep+"(?=acepta)"],["esta","este",sep+"(?=acepta)"]
+  ];
+  const encabezados=F?[["al sr.","a la sra."]]:[["a la sra.","al sr."]];
+  encabezados.concat(pares).forEach(([a,b,despues])=>{
+    const palabras=a.split(" ").map(esc).join(sep);
+    const re=new RegExp(pre+"(?:"+palabras+")"+fin+(despues?despues:""),"gi");
+    texto=texto.replace(re,m=>{
+      const parte=m.match(new RegExp("^"+pre.replace("(?<!","(?<!")+"(?:"+palabras+")"+fin,"i"));
+      const core=parte?parte[0]:m;
+      return casar(core,b)+m.slice(core.length);
+    });
+  });
+  return texto;
+}
+// Nota de registro de contrato (modelo SUBSE - REGISTRO DE CONTRATO). Va a la Subsecretaría con el membrete oficial.
+const MEMO_REGISTRO_DEFAULT = `Rawson, {fecha_larga}
+
+Al Subsecretario de Financiamiento y Comercio para la Producción
+Claudio MOSQUEIRA
+S                /                D:
+
+Ref: {productor_rol}: {nombre}
+Expediente N° {expediente} –
+
+Me dirijo a Ud. a fin de remitir el contrato original correspondiente a {el_la} {productor_min} {nombre}, mencionado en la referencia, para su conocimiento.
+
+Asimismo, una vez tomado conocimiento, solicito tenga a bien remitir las actuaciones a la Secretaría Privada, a efectos de dar continuidad al trámite administrativo correspondiente al registro del citado contrato.
+
+Sin otro particular, saludo a Ud. atentamente.
+
+
+NOTA N° ____ /{anio_corto} – DF-MP`;
+
+// Nota a la Directora Regional para gestionar la firma del contrato y el pago del sello (modelo SELLADO). Con membrete oficial.
+const MEMO_REGIONAL_FIRMA_DEFAULT = `Rawson, {fecha_larga}
+
+A la Directora Regional Delegación Oeste
+Bruno PELAEZ
+S                /                D:
+
+Ref: {productor_rol}: {nombre}
+Expediente N° {expediente} –
+
+Por medio de la presente, me dirijo a Ud. a efectos de remitir tres (3) ejemplares originales del contrato y del pagaré correspondientes al financiamiento otorgado {al_la} {tratamiento} {nombre}, en el marco de la Línea de Crédito CRECER.
+
+Al respecto, se solicita tenga a bien gestionar la firma de la documentación por parte {del_la} {beneficiario_min} y efectuar el correspondiente pago del Impuesto de Sellos, conforme a la normativa vigente.
+
+Una vez cumplidas las gestiones indicadas, se solicita remitir a esta Dirección de Financiamiento los ejemplares debidamente suscriptos, junto con la constancia de pago del Impuesto de Sellos, a efectos de dar continuidad a las actuaciones administrativas correspondientes.
+
+Sin otro particular, saludo a Ud. atentamente.
+
+
+NOTA N° ____ /{anio_corto} – DF-MP`;
+
+// Nota al Director/a Regional para entregar el contrato original al productor (modelo ACOMPAÑA ORIGINAL). Con membrete oficial.
+const MEMO_DIRECTO_ENTREGA_DEFAULT = `Rawson, {fecha_larga}
+
+A la Directora Regional Delegación Oeste
+Bruno PELAEZ
+S                /                D:
+
+Ref: {productor_rol}: {nombre}
+Expediente N° {expediente} –
+
+Por medio de la presente, me dirijo a Ud. a efectos de remitir la Nota N.º ____ /{anio_corto} – DF-MP, destinada {al_la} {productor_min} {nombre}.
+
+La documentación mencionada tiene por objeto informar {al_la} {productor_min} sobre las cuotas correspondientes, sus respectivos vencimientos y los plazos establecidos para la presentación de las rendiciones, a fin de que tome conocimiento de las obligaciones y los procedimientos correspondientes.
+
+A efectos de facilitar la localización y comunicación con el destinatario, se detallan a continuación sus datos de contacto:
+
+1. {nombre}
+Domicilio: {domicilio}.
+Teléfono de contacto: {telefono}.
+
+Por lo expuesto, se solicita tenga a bien arbitrar los medios necesarios para efectuar la entrega de la documentación a {tratamiento} {nombre}.
+
+Asimismo, una vez concretada la entrega, se solicita remitir a esta Dirección la correspondiente constancia de recepción, debidamente firmada por el destinatario, a efectos de dejar registro de la notificación realizada.
+
+Sin otro particular, saludo a Ud. atentamente.
+
+
+NOTA N° ____ /{anio_corto} – DF-MP`;
+
+// Memo OPP (modelo MEMO SUBSE - OPP). Pase a la Dirección Administrativo Contable. Con membrete oficial.
+const MEMO_OPP_DEFAULT = `Rawson, {fecha_larga}
+
+A la Directora Administrativo Contable
+Cra. Verónica Di Benedeto
+S                /                D:
+
+Ref: {productor_rol}: {nombre}
+Expediente N° {expediente} –
+
+Por medio de la presente, remito a esa Dirección las actuaciones de referencia, a efectos de su intervención y prosecución del trámite administrativo correspondiente, teniendo en cuenta que no se formularon observaciones y se aprobó el otorgamiento del crédito solicitado {al_la} {tratamiento} {nombre}, en el marco del presente expediente.
+
+Al respecto, se acompaña la documentación pertinente remitida por la {regional}, correspondiente a un proyecto considerado técnicamente factible, cuyo destino se encuentra comprendido dentro de las líneas de crédito CRECER y de las políticas productivas impulsadas por el Estado Provincial.
+
+Asimismo, se deja constancia de que a foja N.º ____ obra incorporada la constancia de CBU y que a foja N.º ______ se encuentra adjunta la documentación requerida por la Dirección General de Rentas, consistente en el talón de pago del impuesto de sellos y su correspondiente comprobante de pago.
+
+Sin otro particular, saludo a Ud. atentamente.
+
+
+PASE N° ____ /{anio_corto} – DF-MP`;
+
+// Carta documento de intimación (modelo CD). Los importes se calculan a 15 días desde la fecha de emisión.
+const MEMO_CARTA_DEFAULT = `MINISTERIO DE PRODUCCIÓN
+9 de Julio N° 280 - Rawson - Chubut
+
+DESTINATARIO:
+{productor_ap_nombre}
+{domicilio}
+{localidad} - Chubut
+
+En mi carácter de Subsecretario de Financiamiento y Comercio para la Producción dependiente del Ministerio de Producción, en representación del Ministerio de Producción, en ejercicio de las atribuciones y competencias conferidas por la Ley I N.º 764 del Digesto Jurídico Provincial, INTIMO a Ud. para que, en el plazo perentorio de CINCO (5) DÍAS HÁBILES ADMINISTRATIVOS, contados a partir de la recepción de la presente, proceda a cancelar la suma de PESOS {monto_reclamo_letras} CON {monto_reclamo_cent}/100 ({monto_reclamo}), correspondiente a la deuda que mantiene con este Ministerio en concepto de capital adeudado, intereses moratorios e intereses punitorios, conforme la liquidación practicada al día {fecha_corte}.-
+
+La deuda reclamada tiene su origen en el incumplimiento de las obligaciones de pago asumidas mediante contrato de crédito suscripto por {tratamiento} {nombre} con el Ministerio de Producción en fecha {fecha_contrato}, registrado bajo el N.º {numero_contrato}, en el marco de la Línea de Financiamiento «{linea}», cuyo cumplimiento se encuentra garantizado conforme los instrumentos oportunamente suscriptos.-
+
+El pago deberá efectuarse en las dependencias del Ministerio de Producción, más cercana a su domicilio, o mediante transferencia bancaria a la Cuenta Corriente en pesos N.º {cuenta_cobro} del Banco del Chubut S.A., debiendo remitir el correspondiente comprobante de pago a efectos de su acreditación e imputación a la deuda reclamada.-
+
+Se deja expresa constancia de que, vencido el plazo otorgado sin que se haya acreditado la cancelación íntegra de la deuda, se procederá, sin necesidad de nueva intimación, a promover las acciones judiciales pertinentes para obtener el cobro compulsivo del crédito, incluyendo, de corresponder, la ejecución de las garantías constituidas, reclamando asimismo los intereses que continúen devengándose hasta el efectivo e íntegro pago, con más las costas y costos que demande la instancia judicial.-
+
+La presente se cursa en resguardo de los derechos e intereses patrimoniales del Estado Provincial y sin perjuicio de las demás acciones legales que pudieran corresponder.-
+
+QUEDA USTED DEBIDAMENTE {intimado}, {emplazado} Y {notificado}, BAJO APERCIBIMIENTO DE LEY.-
+
+Rawson, Chubut, {fecha_larga}`;
+
 function buildMemoTexto(tipo, credito, linea, tots) {
-  const filas=calcularFilas(credito,getTasas(linea));
+  const filas=calcularFilas(credito,getTasas(linea,credito));
   const destino=findDestino(linea,credito.destinoId);
   const totalCap=filas.reduce((s,f)=>s+(f.cap?.monto||0),0);
   const totalInt=filas.reduce((s,f)=>s+(f.int?.monto||0),0);
@@ -534,12 +911,57 @@ function buildMemoTexto(tipo, credito, linea, tots) {
     "-".repeat(60),
     ...filas.map(f=>`${String(f.mes).padEnd(5)}${fmtDate(f.fechaVencimiento).padEnd(15)}${(f.cap?money(f.cap.monto):"-").padEnd(20)}${f.int?money(f.int.monto):"-"}`),
   ].join("\n");
-  const tpl=tipo==="tesoreriaPago"?(linea?.plantillaMemoTesoreriaPago||MEMO_TESORERIA_PAGO_DEFAULT):
+  const tpl=tipo==="cartaDocumento"?(linea?.plantillaCartaDocumento||MEMO_CARTA_DEFAULT):tipo==="memoOpp"?(linea?.plantillaMemoOpp||MEMO_OPP_DEFAULT):tipo==="directoEntrega"?(linea?.plantillaDirectoEntrega||MEMO_DIRECTO_ENTREGA_DEFAULT):tipo==="regionalFirma"?(linea?.plantillaRegionalFirma||MEMO_REGIONAL_FIRMA_DEFAULT):tipo==="registro"?(linea?.plantillaRegistro||MEMO_REGISTRO_DEFAULT):tipo==="cronograma"?(linea?.plantillaCronograma||MEMO_CRONOGRAMA_DEFAULT):tipo==="libreDeuda"?(linea?.plantillaLibreDeuda||MEMO_LIBRE_DEFAULT):tipo==="contrato"?(linea?.plantillaContrato||MEMO_CONTRATO_DEFAULT):tipo==="intimacion"?(linea?.plantillaIntimacion||MEMO_INTIMACION_DEFAULT):tipo==="tesoreriaPago"?(linea?.plantillaMemoTesoreriaPago||MEMO_TESORERIA_PAGO_DEFAULT):
             tipo==="tesoreriaGarantia"?(linea?.plantillaMemoTesoreriaGarantia||MEMO_TESORERIA_GARANTIA_DEFAULT):
             (linea?.plantillaMemo||MEMO_CONTABLE_DEFAULT);
   const vars={
     fecha_actual:fmtDate(todayStr()),
-    nombre:credito.productor.nombre, dni:credito.productor.dni,
+    localidad:credito.productor.ciudad||"________",
+    fecha_corte:(()=>{const d=new Date();d.setDate(d.getDate()+15);return fmtDate(d.toISOString().slice(0,10));})(),
+    monto_reclamo:(()=>{const d=new Date();d.setDate(d.getDate()+15);const t=totalesAFecha(credito,linea,d.toISOString().slice(0,10)).totalAdeudado||0;return "$"+fmtInt(Math.floor(t))+","+String(Math.round((t-Math.floor(t))*100)%100).padStart(2,"0");})(),
+    monto_reclamo_letras:(()=>{const d=new Date();d.setDate(d.getDate()+15);const t=totalesAFecha(credito,linea,d.toISOString().slice(0,10)).totalAdeudado||0;return numLetras(Math.floor(t));})(),
+    monto_reclamo_cent:(()=>{const d=new Date();d.setDate(d.getDate()+15);const t=totalesAFecha(credito,linea,d.toISOString().slice(0,10)).totalAdeudado||0;return String(Math.round((t-Math.floor(t))*100)%100).padStart(2,"0");})(),
+    productor_ap_nombre:(()=>{const sp=splitNombre(credito.productor?.nombre);return sp.nombre?(sp.apellido.toUpperCase()+" "+sp.nombre):sp.apellido.toUpperCase();})(),
+    intimado:(s=>s==="M"?"INTIMADO":s==="F"?"INTIMADA":"INTIMADO/A")(credito.productor?.sexo),
+    emplazado:(s=>s==="M"?"EMPLAZADO":s==="F"?"EMPLAZADA":"EMPLAZADO/A")(credito.productor?.sexo),
+    notificado:(s=>s==="M"?"NOTIFICADO":s==="F"?"NOTIFICADA":"NOTIFICADO/A")(credito.productor?.sexo),
+    fecha_larga:(()=>{const h=new Date();return h.getDate()+" de "+["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"][h.getMonth()]+" de "+h.getFullYear();})(),
+    fecha_otorgamiento:fmtDate(credito.fechaOtorgamiento),
+    numero_contrato:credito.numeroContrato||"________",
+    anio:String(new Date().getFullYear()),
+    anio_corto:String(new Date().getFullYear()).slice(-2),
+    tratamiento:(s=>s==="M"?"Sr.":s==="F"?"Sra.":"Sr./Sra.")(credito.productor?.sexo),
+    senor:(s=>s==="M"?"Señor":s==="F"?"Señora":"Señor/a")(credito.productor?.sexo),
+    senor_art:(s=>s==="M"?"AL SEÑOR":s==="F"?"A LA SEÑORA":"AL SEÑOR/A LA SEÑORA")(credito.productor?.sexo),
+    el_la:(s=>s==="M"?"el":s==="F"?"la":"el/la")(credito.productor?.sexo),
+    al_la:(s=>s==="M"?"al":s==="F"?"a la":"al/a la")(credito.productor?.sexo),
+    a_art:(s=>s==="M"?"Al":s==="F"?"A la":"A la/al")(credito.productor?.sexo),
+    telefono:credito.productor?.telefono||"________",
+    del_la:(s=>s==="M"?"del":s==="F"?"de la":"del/de la")(credito.productor?.sexo),
+    beneficiario_min:(s=>s==="M"?"beneficiario":s==="F"?"beneficiaria":"beneficiario/a")(credito.productor?.sexo),
+    productor_min:(s=>s==="M"?"productor":s==="F"?"productora":"productor/a")(credito.productor?.sexo),
+    productor_rol:(s=>s==="M"?"Productor":s==="F"?"Productora":"Productor/a")(credito.productor?.sexo),
+    domiciliado:(s=>s==="M"?"domiciliado":s==="F"?"domiciliada":"domiciliado/a")(credito.productor?.sexo),
+    beneficiario_art:(s=>s==="M"?"EL BENEFICIARIO":s==="F"?"LA BENEFICIARIA":"EL/LA BENEFICIARIO/A")(credito.productor?.sexo),
+    este:(s=>s==="M"?"éste":s==="F"?"ésta":"éste/a")(credito.productor?.sexo),
+    fecha_transferencia:fmtDate(credito.fechaOtorgamiento),
+    fecha_otorgamiento:fmtDate(credito.fechaOtorgamiento),
+    fecha_rendicion_limite:(credito.fechaOtorgamiento)?fmtDate(addMonths(credito.fechaOtorgamiento,3)):"-",
+    dni:credito.productor?.dni||"________",
+    destino:destino?.nombre||credito.detalleDestino||"________",
+    monto_pesos:fmtInt(credito.monto||0)+".-",
+    monto_letras:numLetras(credito.monto||0),
+    plazo_texto:(()=>{const y=Math.round(Math.max(0,...(credito.cuotas||[]).map(q=>q.mes||0))/12);return numLetras(y)+" ("+y+") años";})(),
+    cantidad_cuotas:(()=>{const n=cuotasContratoFilas(credito,linea).length;return numLetras(n)+" ("+n+")";})(),
+    cuotas_detalle:(credito.cuotas||[]).filter(q=>q.tipo==="capital").sort((a,b)=>a.numero-b.numero).map((q,i)=>(i+1)+"- PESOS "+numLetras(q.monto)+" ($ "+fmtInt(q.monto)+".-)").join("\n"),
+    intereses_detalle:(credito.cuotas||[]).filter(q=>q.tipo==="interes").sort((a,b)=>a.numero-b.numero).map((q,i)=>(i+1)+"- Vence "+fmtDate(q.fechaVencimiento)+" - PESOS "+numLetras(q.monto)+" ($ "+fmtInt(q.monto)+".-)").join("\n"),
+    tasa_financiera:String(credito.tasaAplicada||linea?.tasaFinanciera||20),
+    tasa_mora:String(getTasas(linea,credito).mora),
+    tasa_punitorio:String(getTasas(linea,credito).punitorio),
+    cuenta_cobro:linea?.numeroCuenta||"________",
+    cbu:linea?.cbu||"________",
+    total_letras:numLetras(r2(totalCap+totalInt)),
+    nombre:nombreNatural(credito.productor.nombre), dni:credito.productor.dni,
     domicilio:`${credito.productor.domicilio||""}, ${credito.productor.ciudad||""}`,
     linea:linea?.nombre||"-", destino:destino?.nombre||credito.detalleDestino||"-",
     expediente:credito.expediente, contrato:credito.numeroContrato||"-",
@@ -551,8 +973,11 @@ function buildMemoTexto(tipo, credito, linea, tots) {
     total_general:money(r2(totalCap+totalInt)),
     total_abonado:money(tots?.abonado||0), saldo_pendiente:money(tots?.totalAdeudado||0),
   };
+  const esHtml=/^\s*</.test(tpl);
   let texto=tpl;
-  Object.entries(vars).forEach(([k,v])=>{texto=texto.replaceAll(`{${k}}`,v);});
+  Object.entries(vars).forEach(([k,v])=>{texto=texto.replaceAll(`{${k}}`,esHtml?escHtmlT(v):v);});
+  texto=generoContrato(texto,credito.productor?.sexo);
+  if(esHtml){texto=texto.replaceAll("[[CRONOGRAMA_NOTA]]",cronogramaNotaHtml(credito,linea));texto=texto.replaceAll("[[CRONOGRAMA]]",cronogramaContratoHtml(credito,linea)).replaceAll("[[SALTO]]",'<div style="page-break-before:always"></div>');}
   return texto;
 }
 
@@ -611,6 +1036,8 @@ class ErrorBoundary extends React.Component{
 function EstadoBadge({estado}){
   const m={
     CANCELADO:{l:"Cancelado",c:"var(--color-neutral)",b:"var(--color-neutral-bg)",I:CheckCircle2},
+    CONDONADO:{l:"Condonado",c:"#0E7490",b:"#CFFAFE",I:CheckCircle2},
+    EN_TRAMITE:{l:"En trámite",c:"#4338CA",b:"#E0E7FF",I:Clock},
     AL_DIA:{l:"Al día",c:"var(--color-success)",b:"var(--color-success-bg)",I:CheckCircle2},
     MORA:{l:"En mora",c:"var(--color-danger)",b:"var(--color-danger-bg)",I:AlertTriangle},
     SIN_CRONOGRAMA:{l:"Sin cronograma",c:"#8A7B4E",b:"#F2EDDB",I:Clock},
@@ -628,6 +1055,10 @@ const SITUACIONES=[
   {id:"nota",label:"Nota",bg:"#FACC15",fg:"#3B2F00",punto:"🟡"},
   {id:"cartaDocumento",label:"Carta Documento",bg:"#F97316",fg:"#FFFFFF",punto:"🟠"},
   {id:"legales",label:"Legales",bg:"#DC2626",fg:"#FFFFFF",punto:"🔴"},
+  {id:"judicializado",label:"Judicializado",bg:"#6D28D9",fg:"#FFFFFF",punto:"🟣"},
+  {id:"emergencia",label:"En Emergencia",bg:"#0F766E",fg:"#FFFFFF",punto:"🟤"},
+  {id:"condonado50",label:"Condonado 50%",bg:"#D97706",fg:"#FFFFFF",punto:"🟠"},
+  {id:"condonado100",label:"Condonado 100%",bg:"#1E40AF",fg:"#FFFFFF",punto:"🔵"},
 ];
 function SituacionBadge({valor,editable,onChange,corto}){
   const[abierto,setAbierto]=useState(false);
@@ -652,11 +1083,38 @@ function SituacionBadge({valor,editable,onChange,corto}){
   </span>;
 }
 
-function RendicionBadge({ok}){
-  const c=ok?"var(--color-success)":"var(--color-danger)";
-  const b=ok?"var(--color-success-bg)":"var(--color-danger-bg)";
-  const I=ok?CheckCircle2:AlertTriangle;
-  return <span style={{color:c,background:b,borderColor:c,display:"inline-flex",alignItems:"center",gap:5,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600,border:"1.5px solid",whiteSpace:"nowrap"}}><I size={11}/>{ok?"Rendición presentada":"Sin rendición"}</span>;
+// Estados de la rendición. "Presentó" y las dos variantes (parcial y observada)
+// cuentan como presentadas: por eso rendicionPresentada queda en true para las tres.
+const REND_ESTADOS=[
+  {id:"sin",label:"En plazo / Sin rendición (automático)"},
+  {id:"presentada",label:"Presentó rendición"},
+  {id:"parcial",label:"Rendición parcial"},
+  {id:"observada",label:"Rendición observada"},
+];
+// Créditos cargados antes de este cambio solo tienen el sí/no (rendicionPresentada)
+function rendEstadoDe(c){
+  if(c&&c.rendicionEstado&&REND_ESTADOS.some(e=>e.id===c.rendicionEstado))return c.rendicionEstado;
+  return c&&c.rendicionPresentada?"presentada":"sin";
+}
+// Estado que se muestra: si no está presentada, "En plazo" mientras no venza el plazo de 90 días desde la transferencia
+function rendEstadoVisual(c){
+  const e=rendEstadoDe(c);
+  if(e!=="sin")return e;
+  const base=c.fechaOtorgamiento;
+  if(!base)return "sin";
+  return todayStr()<=addDays(base,90)?"enplazo":"sin";
+}
+function RendicionBadge({estado,ok}){
+  const e=estado||(ok?"presentada":"sin");
+  const cfg={
+    enplazo:{c:"#1E40AF",b:"#DBEAFE",I:Clock,t:"En plazo"},
+    sin:{c:"var(--color-danger)",b:"var(--color-danger-bg)",I:AlertTriangle,t:"Sin rendición"},
+    presentada:{c:"var(--color-success)",b:"var(--color-success-bg)",I:CheckCircle2,t:"Rendición presentada"},
+    parcial:{c:"#8A5C00",b:"#FFF4D6",I:AlertTriangle,t:"Rendición parcial"},
+    observada:{c:"#B85A00",b:"#FFE9D6",I:AlertTriangle,t:"Rendición observada"},
+  }[e]||{c:"var(--color-danger)",b:"var(--color-danger-bg)",I:AlertTriangle,t:"Sin rendición"};
+  const I=cfg.I;
+  return <span style={{color:cfg.c,background:cfg.b,borderColor:cfg.c,display:"inline-flex",alignItems:"center",gap:5,padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600,border:"1.5px solid",whiteSpace:"nowrap"}}><I size={11}/>{cfg.t}</span>;
 }
 function EFBadge({ef}){
   const m={PAGADA:{l:"Pagada",c:"var(--color-success)"},VENCIDA:{l:"Vencida",c:"var(--color-danger)"},PARCIAL:{l:"Parcial",c:"#8A5C00"},PENDIENTE:{l:"Pendiente",c:"#8A8470"}};
@@ -759,7 +1217,7 @@ function SegEstadoPill({id}){
 // "N° de seguimiento" el código de seguimiento de la gestión (por ejemplo el
 // postal de una carta documento). Ambos son opcionales: no todas las gestiones
 // los tienen (una llamada, por ejemplo).
-function SeguimientoCredito({credito,puedeEditar,onUpdate}){
+function SeguimientoCredito({credito,puedeEditar,puedeEliminar,onUpdate}){
   const lista=Array.isArray(credito.seguimiento)?credito.seguimiento:[];
   const ordenada=[...lista].sort((a,b)=>String(a.fecha||"").localeCompare(String(b.fecha||"")));
   const vacio=()=>({numeroNota:"",numeroSeguimiento:"",fecha:todayStr(),situacion:undefined,destino:"",estado:"enviada",observacion:""});
@@ -817,8 +1275,8 @@ function SeguimientoCredito({credito,puedeEditar,onUpdate}){
                   <button type="button" onClick={()=>eliminar(s.id)} style={{...btnIcono,color:"#A23B2E",borderColor:"#A23B2E",fontSize:11.5}}>Sí</button>{" "}
                   <button type="button" onClick={()=>setConfirmId(null)} style={{...btnIcono,fontSize:11.5}}>No</button></span>
                 :<>
-                  <button type="button" title="Editar" onClick={()=>editar(s)} style={btnIcono}><Pencil size={14}/></button>{" "}
-                  <button type="button" title="Eliminar" onClick={()=>setConfirmId(s.id)} style={btnIcono}><Trash2 size={14}/></button>
+                  <button type="button" title="Editar" onClick={()=>editar(s)} style={btnIcono}><Pencil size={14}/></button>{puedeEliminar&&<>{" "}
+                  <button type="button" title="Eliminar" onClick={()=>setConfirmId(s.id)} style={btnIcono}><Trash2 size={14}/></button></>}
                 </>}
             </td>}
           </tr>)}
@@ -905,15 +1363,215 @@ function NavItem({icon:I,label,active,onClick}){
 }
 
 // ─── Login ────────────────────────────────────────────────────────────────────
-function LoginScreen({usuarios,onLogin,config,onReset}){
+// ─── Seguridad: claves con hash (PBKDF2 + sal) y copia de seguridad cifrada (AES-GCM) ───
+const PBKDF2_ITER=150000;
+function bytesHex(u8){return Array.from(u8).map(x=>x.toString(16).padStart(2,"0")).join("");}
+function hexBytes(h){return new Uint8Array((h.match(/.{2}/g)||[]).map(x=>parseInt(x,16)));}
+function bytesB64(u8){let s="";for(let i=0;i<u8.length;i++)s+=String.fromCharCode(u8[i]);return btoa(s);}
+function b64Bytes(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+async function hashClave(clave,saltHex){
+  const km=await crypto.subtle.importKey("raw",new TextEncoder().encode(String(clave)),"PBKDF2",false,["deriveBits"]);
+  const bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:hexBytes(saltHex),iterations:PBKDF2_ITER,hash:"SHA-256"},km,256);
+  return bytesHex(new Uint8Array(bits));
+}
+// Credencial nueva: sal aleatoria + hash. La clave nunca se guarda en texto.
+async function crearCredencial(clave){
+  const salt=bytesHex(crypto.getRandomValues(new Uint8Array(16)));
+  return{salt,hash:await hashClave(clave,salt)};
+}
+async function verificarClave(u,clave){
+  if(!u||!u.salt||!u.hash)return false;
+  return (await hashClave(clave,u.salt))===u.hash;
+}
+async function derivarAES(clave,saltBytes){
+  const km=await crypto.subtle.importKey("raw",new TextEncoder().encode(String(clave)),"PBKDF2",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt:saltBytes,iterations:PBKDF2_ITER,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+async function cifrarRespaldo(texto,clave){
+  const salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await derivarAES(clave,salt);
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,new TextEncoder().encode(texto));
+  return{formato:"crecer-respaldo",v:1,salt:bytesB64(salt),iv:bytesB64(iv),data:bytesB64(new Uint8Array(ct))};
+}
+async function descifrarRespaldo(obj,clave){
+  const key=await derivarAES(clave,b64Bytes(obj.salt));
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64Bytes(obj.iv)},key,b64Bytes(obj.data));
+  return new TextDecoder().decode(pt);
+}
+
+// Pantalla de primer ingreso: crea el administrador (no hay usuarios de fábrica)
+function SetupScreen({config,onCrear}){
+  const[usuario,setUsuario]=useState(""), [nombre,setNombre]=useState(""), [clave,setClave]=useState(""), [clave2,setClave2]=useState(""), [error,setError]=useState(""), [ocupado,setOcupado]=useState(false);
+  async function crear(){
+    if(!usuario.trim()||!nombre.trim()){setError("Completá el usuario y el nombre.");return;}
+    if(clave.length<10){setError("La clave debe tener al menos 10 caracteres.");return;}
+    if(clave!==clave2){setError("Las claves no coinciden.");return;}
+    setOcupado(true);
+    const cred=await crearCredencial(clave);
+    onCrear({usuario:usuario.trim(),nombre:nombre.trim(),rol:"admin",mustChange:false,...cred});
+  }
+  return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--color-bg)",fontFamily:"'Public Sans',system-ui"}}>
+    <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:14,padding:"34px 32px",width:380,boxShadow:"0 10px 30px rgba(40,40,20,0.08)"}}>
+      <div style={{fontFamily:"'Rubik',Georgia,sans-serif",fontSize:18,fontWeight:700,color:"#23362B"}}>{config.sistemaNombre||"Sistema CRECER"}</div>
+      <div style={{fontSize:12.5,color:"#5B6B63",margin:"8px 0 16px",lineHeight:1.5}}>Primer ingreso: creá la cuenta del administrador. No hay usuarios de fábrica.</div>
+      <Campo label="Usuario"><input style={iS} value={usuario} onChange={e=>setUsuario(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck="false"/></Campo>
+      <Campo label="Nombre y apellido"><input style={iS} value={nombre} onChange={e=>setNombre(e.target.value)}/></Campo>
+      <Campo label="Clave (mínimo 10 caracteres)"><input style={iS} type="password" value={clave} onChange={e=>setClave(e.target.value)} autoComplete="new-password"/></Campo>
+      <Campo label="Confirmar clave"><input style={iS} type="password" value={clave2} onChange={e=>setClave2(e.target.value)} autoComplete="new-password" onKeyDown={e=>e.key==="Enter"&&crear()}/></Campo>
+      {error&&<div style={{color:"#A23B2E",fontSize:12.5,marginBottom:10}}>{error}</div>}
+      <Boton type="button" onClick={crear} disabled={ocupado}>Crear administrador e ingresar</Boton>
+    </div>
+  </div>;
+}
+
+// Cambio obligatorio de clave en el primer ingreso (usuarios cargados con clave temporal o migrados)
+function CambiarClaveForzado({user,onListo}){
+  const[clave,setClave]=useState(""), [clave2,setClave2]=useState(""), [error,setError]=useState(""), [ocupado,setOcupado]=useState(false);
+  async function guardar(){
+    if(clave.length<10){setError("La clave debe tener al menos 10 caracteres.");return;}
+    if(clave!==clave2){setError("Las claves no coinciden.");return;}
+    setOcupado(true);
+    onListo(await crearCredencial(clave));
+  }
+  return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--color-bg)",fontFamily:"'Public Sans',system-ui"}}>
+    <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:14,padding:"34px 32px",width:380,boxShadow:"0 10px 30px rgba(40,40,20,0.08)"}}>
+      <div style={{fontFamily:"'Rubik',Georgia,sans-serif",fontSize:17,fontWeight:700,color:"#23362B"}}>Cambiá tu clave</div>
+      <div style={{fontSize:12.5,color:"#5B6B63",margin:"8px 0 16px",lineHeight:1.5}}>Hola {user.nombre}. Por seguridad, debés elegir una clave nueva antes de continuar.</div>
+      <Campo label="Nueva clave (mínimo 10 caracteres)"><input style={iS} type="password" value={clave} onChange={e=>setClave(e.target.value)} autoComplete="new-password"/></Campo>
+      <Campo label="Confirmar nueva clave"><input style={iS} type="password" value={clave2} onChange={e=>setClave2(e.target.value)} autoComplete="new-password" onKeyDown={e=>e.key==="Enter"&&guardar()}/></Campo>
+      {error&&<div style={{color:"#A23B2E",fontSize:12.5,marginBottom:10}}>{error}</div>}
+      <Boton type="button" onClick={guardar} disabled={ocupado}>Guardar clave e ingresar</Boton>
+    </div>
+  </div>;
+}
+
+// Registro de actividad: quién creó, modificó o eliminó créditos, y cuándo
+function ActividadModal({log,onClose}){
+  const fmt=f=>{const d=new Date(f);return isNaN(d)?"-":d.toLocaleString("es-AR",{dateStyle:"short",timeStyle:"short"});};
+  return <div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:16}}>
+    <div style={{background:"#fff",borderRadius:12,width:760,maxWidth:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+      <BandaTricolor marginBottom={0}/>
+      <div style={{padding:"12px 18px",borderBottom:"1px solid #EEE9D9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:700,color:"var(--color-titulo)",fontSize:15}}>Registro de actividad</div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+      </div>
+      <div style={{flex:1,overflow:"auto",padding:"0 18px 16px"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,marginTop:12}}>
+          <thead><tr style={{background:"#F0ECDD"}}><th style={TH}>Fecha y hora</th><th style={TH}>Usuario</th><th style={TH}>Acción</th><th style={TH}>Detalle</th></tr></thead>
+          <tbody>
+            {(log||[]).slice(0,500).map((r,i)=><tr key={i} style={{borderTop:"1px solid #EEE9D9"}}><td style={{...TD,whiteSpace:"nowrap"}}>{fmt(r.fecha)}</td><td style={TD}>{r.usuario}</td><td style={TD}>{r.accion}</td><td style={TD}>{r.detalle}</td></tr>)}
+            {(!log||log.length===0)&&<tr><td colSpan={4} style={{...TD,textAlign:"center",color:"#9A9482",padding:24}}>Todavía no hay actividad registrada.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>;
+}
+
+// Clave de las copias automáticas: se pide una vez al ingresar y queda solo en memoria durante la sesión
+function ClaveCopiasModal({onGuardar,onOmitir}){
+  const[clave,setClave]=useState(""), [clave2,setClave2]=useState(""), [error,setError]=useState("");
+  function guardar(){
+    if(clave.length<10){setError("La clave debe tener al menos 10 caracteres.");return;}
+    if(clave!==clave2){setError("Las claves no coinciden.");return;}
+    onGuardar(clave);
+  }
+  return <div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:160,padding:16}}>
+    <div style={{background:"#fff",borderRadius:12,width:460,maxWidth:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+      <BandaTricolor marginBottom={0}/>
+      <div style={{padding:"16px 20px"}}>
+        <div style={{fontWeight:700,fontSize:15,color:"var(--color-titulo)",marginBottom:6}}>Copias automáticas cada 2 horas</div>
+        <div style={{fontSize:12.5,color:"#5B6B63",marginBottom:12,lineHeight:1.5}}>Para guardar copias cifradas sin que tengas que estar pendiente, ingresá una clave para las copias. Se guarda solo mientras la sesión esté abierta: al cerrar la sesión o recargar la página, hay que ingresarla de nuevo.</div>
+        <Campo label="Clave de las copias (mínimo 10 caracteres)"><input style={iS} type="password" value={clave} onChange={e=>setClave(e.target.value)} autoComplete="new-password"/></Campo>
+        <Campo label="Confirmar clave"><input style={iS} type="password" value={clave2} onChange={e=>setClave2(e.target.value)} autoComplete="new-password" onKeyDown={e=>e.key==="Enter"&&guardar()}/></Campo>
+        {error&&<div style={{color:"#A23B2E",fontSize:12.5,marginBottom:10}}>{error}</div>}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+          <Boton variant="outline" onClick={onOmitir}>Solo copias manuales</Boton>
+          <Boton onClick={guardar}>Activar copias automáticas</Boton>
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+// Copia de seguridad cifrada: exportar (con clave) e importar (con clave)
+function RespaldoModal({datos,onRestaurar,onClose,copiaAuto,copias,onToggleAuto,onDescargar}){
+  const[clave,setClave]=useState(""), [clave2,setClave2]=useState(""), [archivo,setArchivo]=useState(null), [msg,setMsg]=useState(""), [ocupado,setOcupado]=useState(false);
+  async function exportar(){
+    if(clave.length<10){setMsg("La clave de la copia debe tener al menos 10 caracteres.");return;}
+    if(clave!==clave2){setMsg("Las claves no coinciden.");return;}
+    setOcupado(true);
+    const payload=JSON.stringify({v:1,fecha:new Date().toISOString(),...datos});
+    const enc=await cifrarRespaldo(payload,clave);
+    const blob=new Blob([JSON.stringify(enc)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download="copia-crecer-"+new Date().toISOString().slice(0,10)+".crecer";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+    setOcupado(false); setMsg("Copia cifrada generada. Guardala en un lugar seguro: sin la clave no se puede abrir.");
+  }
+  async function restaurar(){
+    if(!archivo){setMsg("Elegí el archivo de copia.");return;}
+    if(!clave){setMsg("Ingresá la clave de la copia.");return;}
+    setOcupado(true);
+    try{
+      const obj=JSON.parse(await archivo.text());
+      const d=JSON.parse(await descifrarRespaldo(obj,clave));
+      if(d.v!==1)throw new Error("versión");
+      onRestaurar(d); onClose();
+    }catch(e){ setOcupado(false); setMsg("No se pudo abrir la copia: clave incorrecta o archivo dañado."); }
+  }
+  return <div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:16}}>
+    <div style={{background:"#fff",borderRadius:12,width:520,maxWidth:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+      <BandaTricolor marginBottom={0}/>
+      <div style={{padding:"12px 18px",borderBottom:"1px solid #EEE9D9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:700,color:"var(--color-titulo)",fontSize:15}}>Copia de seguridad</div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+      </div>
+      <div style={{padding:"14px 18px"}}>
+        <div style={{background:"#F7F4EC",borderRadius:8,padding:"10px 12px",marginBottom:14}}>
+          <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,fontWeight:700,color:"#23362B",cursor:"pointer"}}><input type="checkbox" checked={!!(copiaAuto&&copiaAuto.activa)} onChange={e=>onToggleAuto(e.target.checked)}/>Copia automática cada 2 horas</label>
+          <div style={{fontSize:12,color:"#5B6B63",marginTop:4}}>{copiaAuto&&copiaAuto.activa?"Se guarda una copia cifrada cada 2 horas en el sistema (se conservan las últimas 12).":"Desactivadas: solo copias manuales."}</div>
+          {copias&&copias.length>0&&<div style={{fontSize:12,marginTop:8,color:"#23362B"}}>Última copia automática: {new Date(copias[0].fecha).toLocaleString("es-AR")} <Boton size="sm" variant="outline" onClick={()=>onDescargar(copias[0])}>Descargar</Boton></div>}
+        </div>
+        <div style={{fontWeight:700,fontSize:13,color:"#23362B",marginBottom:6}}>Crear copia cifrada</div>
+        <div style={{fontSize:12,color:"#5B6B63",marginBottom:8}}>Incluye créditos, líneas, usuarios, configuración y registro de actividad, todo cifrado con la clave que elijas.</div>
+        <Campo label="Clave de la copia (mínimo 10 caracteres)"><input style={iS} type="password" value={clave} onChange={e=>setClave(e.target.value)} autoComplete="new-password"/></Campo>
+        <Campo label="Confirmar clave"><input style={iS} type="password" value={clave2} onChange={e=>setClave2(e.target.value)} autoComplete="new-password"/></Campo>
+        <Boton size="sm" icon={Save} onClick={exportar} disabled={ocupado}>Generar copia cifrada</Boton>
+        <div style={{height:1,background:"#EEE9D9",margin:"16px 0"}}/>
+        <div style={{fontWeight:700,fontSize:13,color:"#23362B",marginBottom:6}}>Restaurar desde una copia</div>
+        <div style={{fontSize:12,color:"#A23B2E",marginBottom:8}}>Reemplaza TODOS los datos actuales por los de la copia.</div>
+        <input type="file" accept=".crecer,application/json" onChange={e=>setArchivo(e.target.files&&e.target.files[0])} style={{fontSize:12,marginBottom:8}}/>
+        <Campo label="Clave de la copia"><input style={iS} type="password" value={clave} onChange={e=>setClave(e.target.value)} autoComplete="new-password"/></Campo>
+        <Boton size="sm" variant="danger" onClick={restaurar} disabled={ocupado}>Restaurar copia</Boton>
+        {msg&&<div style={{marginTop:12,fontSize:12.5,color:"#5B6B63"}}>{msg}</div>}
+      </div>
+    </div>
+  </div>;
+}
+
+function LoginScreen({usuarios,onLogin,config,onReset,aviso}){
   const[usuario,setUsuario]=useState("");
   const[clave,setClave]=useState("");
   const[verClave,setVerClave]=useState(false);
   const[error,setError]=useState("");
   const[confirmR,setConfirmR]=useState(false);
-  function tryLogin(){
-    const u=usuarios.find(x=>x.usuario.trim().toLowerCase()===usuario.trim().toLowerCase()&&x.clave.trim()===clave.trim());
-    if(!u){setError("Usuario o clave incorrectos.");return;}
+  async function tryLogin(){
+    const key=usuario.trim().toLowerCase();
+    const intentos=(await loadJSON("crecer-intentos",{}))||{};
+    const reg=intentos[key];
+    if(reg&&reg.hasta>Date.now()){setError("Demasiados intentos. Esperá "+Math.ceil((reg.hasta-Date.now())/1000)+" segundos antes de volver a intentar.");return;}
+    const u=usuarios.find(x=>x.usuario.trim().toLowerCase()===key);
+    const ok=u&&await verificarClave(u,clave);
+    if(!ok){
+      const n=(reg&&reg.n||0)+1;
+      const espera=n>=5?Math.min(900000,30000*Math.pow(2,n-5)):0;
+      await saveJSON("crecer-intentos",{...intentos,[key]:{n,hasta:espera?Date.now()+espera:0}});
+      setError("Usuario o clave incorrectos."+(espera?" Cuenta bloqueada por "+Math.round(espera/1000)+" segundos.":""));
+      return;
+    }
+    await saveJSON("crecer-intentos",{...intentos,[key]:undefined});
     setError("");onLogin(u);
   }
   return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"var(--color-bg)",fontFamily:"'Public Sans',system-ui"}}>
@@ -938,9 +1596,9 @@ function LoginScreen({usuarios,onLogin,config,onReset}){
           </button>
         </div>
       </Campo>
+      {aviso&&<div style={{color:"#8A5C00",fontSize:12.5,marginBottom:10}}>{aviso}</div>}
       {error&&<div style={{color:"#A23B2E",fontSize:12.5,marginBottom:10}}>{error}</div>}
       <Boton type="button" onClick={tryLogin}>Ingresar</Boton>
-      <div style={{marginTop:14,fontSize:11,color:"#B0AA94",lineHeight:1.5}}>Prueba: <b>admin / admin</b> o <b>consulta / consulta</b></div>
       <div style={{marginTop:16,paddingTop:12,borderTop:"1px dashed #E4DFCF"}}>
         {!confirmR?<button onClick={()=>setConfirmR(true)} style={{background:"transparent",border:"none",color:"#B0AA94",fontSize:11,cursor:"pointer",textDecoration:"underline",padding:0}}>¿No podés ingresar o hay un error? Restablecer datos</button>:
         <div style={{fontSize:11.5,color:"#A23B2E"}}>
@@ -954,7 +1612,7 @@ function LoginScreen({usuarios,onLogin,config,onReset}){
 
 // ─── Modal de notas (Contable / Tesorería) ───────────────────────────────────
 const FONTS=["serif","sans-serif","monospace","Georgia","Arial","Times New Roman","Courier New"];
-const PAPER_SIZES={A4:{w:"210mm",h:"297mm"},Oficio:{w:"216mm",h:"330mm"},Carta:{w:"216mm",h:"279mm"}};
+const PAPER_SIZES={A4:{w:"210mm",h:"297mm"},Oficio:{w:"216mm",h:"356mm"},Carta:{w:"216mm",h:"279mm"}};
 
 // ─── Membrete oficial de las notas (plantilla HOJA_CON_LOGO.docx) ────────────
 // Hoja A4: leyenda del año + logo del Ministerio arriba; franja de color con
@@ -992,7 +1650,7 @@ function buildMemoPrintHTML({titulo,bodyHtml,fmt,config}){
   </style></head><body>
     <div class="cabecera">
       <div class="leyenda">${val("membreteLeyenda")}</div>
-      <img class="logo" src="${MEMBRETE_LOGO}" alt=""/>
+      <img class="logo" src="${cf.membreteLogo||MEMBRETE_LOGO}" alt=""/>
     </div>
     <div class="pie">
       <img src="${MEMBRETE_PIE}" alt=""/>
@@ -1008,16 +1666,63 @@ function buildMemoPrintHTML({titulo,bodyHtml,fmt,config}){
   </body></html>`;
 }
 
+// Versión para Word: mismo membrete y márgenes, con el encabezado y el pie en el flujo del documento.
+// Proporción de una imagen PNG (lee el encabezado; null si no es PNG)
+function pngSize(dataUrl){
+  try{
+    const m=/^data:image\/png;base64,(.*)$/.exec(dataUrl||""); if(!m)return null;
+    const bin=atob(m[1].slice(0,48)); const b=i=>bin.charCodeAt(i);
+    const w=(b(16)*16777216)+(b(17)*65536)+(b(18)*256)+b(19);
+    const h=(b(20)*16777216)+(b(21)*65536)+(b(22)*256)+b(23);
+    return(w&&h)?{w,h}:null;
+  }catch(e){return null;}
+}
+// <img> con ancho fijo y alto proporcional (evita que Word deforme el logo)
+function imgTagW(src,dataUrl,W){
+  const d=pngSize(dataUrl); const h=d?Math.round(W*d.h/d.w):null;
+  return '<img src="'+src+'" width="'+W+'"'+(h?' height="'+h+'"':'')+' alt=""/>';
+}
+// Documento Word con las imágenes incluidas (MHT): el logo y la franja se ven en Word y LibreOffice
+function armarMht(html,partes){
+  const B="CRECER_MHT_BOUNDARY";
+  let out="MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\""+B+"\"; type=\"text/html\"\r\n\r\n--"+B+"\r\nContent-Type: text/html; charset=\"utf-8\"\r\nContent-Location: documento.htm\r\n\r\n"+html+"\r\n";
+  partes.forEach(pt=>{
+    const m=/^data:([^;]+);base64,(.*)$/.exec(pt.dataUrl||""); if(!m)return;
+    const b64=m[2].replace(/(.{76})/g,"$1\r\n");
+    out+="--"+B+"\r\nContent-Location: "+pt.name+"\r\nContent-Transfer-Encoding: base64\r\nContent-Type: "+m[1]+"\r\n\r\n"+b64+"\r\n";
+  });
+  return out+"--"+B+"--\r\n";
+}
+function buildMemoWordHTML({titulo,bodyHtml,fmt,config,logoSrc,pieSrc}){
+  const ps=PAPER_SIZES[fmt.paperSize]||PAPER_SIZES.A4;
+  const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const cf=config||{};
+  const val=k=>esc(cf[k]||DEFAULT_CONFIG[k]);
+  const num=(v,d)=>{const x=parseFloat(v);return isFinite(x)?x:d;};
+  const fam=`${fmt.fontFamily}, "Times New Roman", serif`;
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>
+    @page{size:${ps.w} ${ps.h};margin:${num(fmt.marginT,49)}mm ${num(fmt.marginR,15)}mm ${num(fmt.marginB,36)}mm ${num(fmt.marginL,35)}mm;}
+    body{font-family:${fam};font-size:${fmt.fontSize}pt;color:${fmt.color};}
+    p{margin:0 0 4pt 0;}
+  </style></head><body>
+    <p align="center" style="font-family:'Times New Roman',serif;font-weight:bold;font-style:italic;font-size:10pt;">${val("membreteLeyenda")}</p>
+    <p>${imgTagW(logoSrc||MEMBRETE_LOGO,cf.membreteLogo||MEMBRETE_LOGO,200)}</p>
+    <div>${bodyHtml}</div>
+    <p>${imgTagW(pieSrc||MEMBRETE_PIE,MEMBRETE_PIE,680)}</p>
+    <p style="font-size:9pt;color:#ffffff;background:#21708c;">${val("membreteDir1")} · ${val("membreteDir2")} · ${val("membreteTel")} · ${val("membreteEmail")}</p>
+  </body></html>`;
+}
 const MEMO_K=3;                       // px por mm en la vista previa
 const MEMO_PT=MEMO_K*25.4/72;         // px por punto tipográfico en la vista previa
 
 function MemoModal({tipo,credito,linea,tots,config,onClose}){
   const editorRef=React.useRef(null);
-  const[fmt,setFmt]=useState({fontFamily:"Times New Roman",fontSize:"12",paperSize:"A4",marginT:"49",marginB:"36",marginL:"35",marginR:"15",color:"#000000"});
+  const[fmt,setFmt]=useState(tipo==="contrato"?{fontFamily:"Times New Roman",fontSize:"11",paperSize:"Oficio",marginT:"49",marginB:"36",marginL:"40",marginR:"20",color:"#000000"}:{fontFamily:"Times New Roman",fontSize:"12",paperSize:"A4",marginT:"49",marginB:"36",marginL:"35",marginR:"15",color:"#000000"});
   const[aviso,setAviso]=useState("");
   const initHtml=useMemo(()=>{
     const t=buildMemoTexto(tipo,credito,linea,tots);
-    return t.split("\n").map(l=>`<div>${l||"&nbsp;"}</div>`).join("");
+    if(/^\s*</.test(t))return t;
+    return t.split("\n").map(l=>l==="[[CRONOGRAMA_NOTA]]"?cronogramaNotaHtml(credito,linea):l==="[[CRONOGRAMA]]"?cronogramaContratoHtml(credito,linea):l==="[[SALTO]]"?`<div style="page-break-before:always"></div>`:`<div>${l||"&nbsp;"}</div>`).join("");
   },[]);
   const[html,setHtml]=useState(initHtml);
 
@@ -1034,7 +1739,7 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
     const w=window.open("","_blank","width=900,height=800");
     if(!w){setAviso("El navegador bloqueó la ventana de impresión. Permití las ventanas emergentes para este sitio e intentá de nuevo.");return;}
     setAviso("");
-    w.document.write(buildMemoPrintHTML({titulo:MEMO_TITULOS[tipo]||"Nota",bodyHtml:editorRef.current?.innerHTML||html,fmt,config}));
+    w.document.write(buildMemoPrintHTML({titulo:MEMO_TITULOS[tipo]||"Nota",bodyHtml:editorRef.current?.innerHTML||html,fmt,config:cfgLinea}));
     w.document.close();
     // Esperar a que carguen las imágenes del membrete y la tipografía antes de imprimir
     const imgs=Array.from(w.document.images).map(im=>im.decode?im.decode().catch(()=>{}):Promise.resolve());
@@ -1042,14 +1747,28 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
     Promise.race([Promise.all([...imgs,fuentes]),new Promise(r=>setTimeout(r,2000))]).then(()=>setTimeout(()=>w.print(),150));
   }
 
+  // Descarga en Word (.doc): se abre directamente en Microsoft Word o LibreOffice
+  function doWord(){
+    const htmlW=buildMemoWordHTML({titulo:MEMO_TITULOS[tipo]||"Nota",bodyHtml:editorRef.current?.innerHTML||html,fmt,config:cfgLinea,logoSrc:"membrete_logo.png",pieSrc:"membrete_pie.png"});
+    const mht=armarMht(htmlW,[{name:"membrete_logo.png",dataUrl:cfgLinea.membreteLogo||MEMBRETE_LOGO},{name:"membrete_pie.png",dataUrl:MEMBRETE_PIE}]);
+    const blob=new Blob([mht],{type:"application/msword"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=((MEMO_TITULOS[tipo]||"Nota").replace(/[^\w\- ]/g,"").trim()||"Nota")+".doc";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  }
   // ── Vista previa de la hoja con membrete ──
   const ps=PAPER_SIZES[fmt.paperSize]||PAPER_SIZES.A4;
   const pw=parseFloat(ps.w),ph=parseFloat(ps.h);
   const nm=(v,d)=>{const x=parseFloat(v);return isFinite(x)?x:d;};
   const mT=nm(fmt.marginT,49),mB=nm(fmt.marginB,36),mL=nm(fmt.marginL,35),mR=nm(fmt.marginR,15);
   const K=MEMO_K;
+  const reglaH=[];for(let mm=0;mm<=pw;mm+=5)reglaH.push(mm);
+  const reglaV=[];for(let mm=0;mm<=ph;mm+=5)reglaV.push(mm);
   const fam=`${fmt.fontFamily}, "Times New Roman", serif`;
-  const leyenda=config?.membreteLeyenda||DEFAULT_CONFIG.membreteLeyenda;
+  const cfgLinea={...config,membreteLeyenda:linea?.membreteLeyenda||config?.membreteLeyenda,membreteLogo:linea?.membreteLogo||""};
+  const leyenda=cfgLinea.membreteLeyenda||DEFAULT_CONFIG.membreteLeyenda;
   const pieT=(k)=>config?.[k]||DEFAULT_CONFIG[k];
 
   return <div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:16}}>
@@ -1058,7 +1777,7 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
       {/* Cabecera */}
       <div style={{padding:"12px 16px",borderBottom:"1px solid #EEE9D9",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
         <div style={{fontWeight:700,color:"var(--color-titulo)",fontSize:14}}>{MEMO_TITULOS[tipo]||"Nota"}</div>
-        <div style={{display:"flex",gap:8}}><Boton size="sm" icon={Printer} onClick={doImprimir}>Imprimir / PDF</Boton><button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={18}/></button></div>
+        <div style={{display:"flex",gap:8}}><Boton size="sm" icon={Printer} onClick={doImprimir}>Imprimir / PDF</Boton><Boton size="sm" variant="outline" icon={FileSignature} onClick={doWord}>Word</Boton><button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={18}/></button></div>
       </div>
       {aviso&&<div style={{padding:"6px 16px",background:"#FFF3F0",color:"#A23B2E",fontSize:12}}>{aviso}</div>}
       {/* Opciones de formato y página */}
@@ -1079,6 +1798,7 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
           {fmtBtn("≡C","justifyCenter",null,"Centrar")}
           {fmtBtn("≡D","justifyRight",null,"Alinear der.")}
           {fmtBtn("≡J","justifyFull",null,"Justificado completo")}
+          <button title="Insertar una línea en blanco en el cursor" onClick={()=>cmd("insertHTML","<div><br></div>")} style={{padding:"3px 7px",fontSize:12,background:"#F0ECDD",border:"1px solid #DDD",borderRadius:4,cursor:"pointer"}}>↵ Espacio</button>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4}}>
           <span style={{fontSize:11,color:"#5B6B63"}}>Color:</span>
@@ -1095,13 +1815,27 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
           )}
         </div>
       </div>
+      {!credito.productor?.sexo&&<div style={{background:"#FFF3F0",border:"1px solid #E7B4AA",color:"#A23B2E",borderRadius:8,padding:"8px 12px",fontSize:12.5,marginBottom:10}}>Falta cargar el género del productor en la planilla (Género). Sin ese dato, el texto de la nota no se puede adecuar.</div>}
       {/* Hoja con membrete (vista previa) + editor */}
       <div style={{flex:1,overflowY:"auto",padding:"14px 20px",background:"#ECE8DA"}}>
-        <div style={{fontSize:11,color:"#6B6560",marginBottom:8}}>Editá el texto libremente antes de imprimir. La hoja sale con el membrete oficial del Ministerio (logo arriba y franja de color al pie).</div>
-        <div style={{position:"relative",width:pw*K,minHeight:ph*K,margin:"0 auto",background:"#fff",boxShadow:"0 2px 10px rgba(0,0,0,0.18)",overflow:"hidden"}}>
+        <div style={{fontSize:11,color:"#6B6560",marginBottom:8}}>Editá el texto libremente antes de imprimir; podés agregar espacios con “↵ Espacio”. Las reglas están en milímetros y las líneas rojas punteadas marcan los márgenes (solo se ven en pantalla). La hoja sale con el membrete oficial del Ministerio (logo arriba y franja de color al pie).</div>
+        <div style={{position:"relative",width:pw*K,minHeight:ph*K,margin:"26px auto 0",background:"#fff",boxShadow:"0 2px 10px rgba(0,0,0,0.18)"}}>
+          {/* Regla horizontal (mm) */}
+          <div style={{position:"absolute",left:0,top:-18,width:pw*K,height:16,pointerEvents:"none"}}>
+            {reglaH.map(mm=><div key={"h"+mm} style={{position:"absolute",left:mm*K,top:mm%10===0?0:9,height:mm%10===0?16:7,width:1,background:"#6B6560"}}>{mm%10===0&&<span style={{position:"absolute",left:2,top:-2,fontSize:9,color:"#6B6560"}}>{mm}</span>}</div>)}
+          </div>
+          {/* Regla vertical (mm) */}
+          <div style={{position:"absolute",left:-20,top:0,width:16,height:ph*K,pointerEvents:"none"}}>
+            {reglaV.map(mm=><div key={"v"+mm} style={{position:"absolute",top:mm*K,left:mm%10===0?0:9,width:mm%10===0?16:7,height:1,background:"#6B6560"}}>{mm%10===0&&<span style={{position:"absolute",left:-16,top:-6,fontSize:9,color:"#6B6560"}}>{mm}</span>}</div>)}
+          </div>
+          {/* Márgenes configurados */}
+          <div style={{position:"absolute",left:0,right:0,top:mT*K,borderTop:"1px dashed #E11D48",pointerEvents:"none",zIndex:3}}/>
+          <div style={{position:"absolute",left:0,right:0,top:(ph-mB)*K,borderTop:"1px dashed #E11D48",pointerEvents:"none",zIndex:3}}/>
+          <div style={{position:"absolute",top:0,bottom:0,left:mL*K,borderLeft:"1px dashed #E11D48",pointerEvents:"none",zIndex:3}}/>
+          <div style={{position:"absolute",top:0,bottom:0,right:mR*K,borderRight:"1px dashed #E11D48",pointerEvents:"none",zIndex:3}}/>
           {/* Encabezado: leyenda del año y logo */}
           <div style={{position:"absolute",left:48.5*K,top:13.8*K,width:125.5*K,textAlign:"center",fontFamily:"'Times New Roman',serif",fontWeight:700,fontStyle:"italic",fontSize:10*MEMO_PT,color:"#000",lineHeight:1.2}}>{leyenda}</div>
-          <img src={MEMBRETE_LOGO} alt="" style={{position:"absolute",left:30.45*K,top:33*K,width:48.07*K}}/>
+          <img src={cfgLinea.membreteLogo||MEMBRETE_LOGO} alt="" style={{position:"absolute",left:30.45*K,top:33*K,width:48.07*K}}/>
           {/* Pie: franja de color + dirección, teléfono y correo */}
           <img src={MEMBRETE_PIE} alt="" style={{position:"absolute",left:0,bottom:0,width:"100%"}}/>
           <div style={{position:"absolute",left:23.6*K,bottom:10*K,width:62*K,color:"#fff",fontFamily:"'Public Sans',Arial,sans-serif",fontSize:9*MEMO_PT,lineHeight:1.25}}>{pieT("membreteDir1")}<br/>{pieT("membreteDir2")}</div>
@@ -1110,8 +1844,7 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
           {/* Texto editable */}
           <div style={{position:"relative",zIndex:1,padding:`${mT*K}px ${mR*K}px ${mB*K}px ${mL*K}px`}}>
             <div ref={editorRef} contentEditable suppressContentEditableWarning
-              onInput={()=>setHtml(editorRef.current?.innerHTML||"")}
-              dangerouslySetInnerHTML={{__html:html}}
+              dangerouslySetInnerHTML={{__html:initHtml}}
               style={{minHeight:120,fontFamily:fam,fontSize:`${(Number(fmt.fontSize)||12)*MEMO_PT}px`,color:fmt.color,lineHeight:"normal",outline:"none"}}/>
           </div>
         </div>
@@ -1122,7 +1855,7 @@ function MemoModal({tipo,credito,linea,tots,config,onClose}){
 
 // ─── Modal de aviso de pago ───────────────────────────────────────────────────
 function PagoReminderModal({credito,linea,onClose}){
-  const tasas=getTasas(linea);
+  const tasas=getTasas(linea,credito);
   const filas=calcularFilas(credito,tasas);
   const pendientes=filas.filter(f=>estadoFila(f)!=="PAGADA");
   const[seleccion,setSeleccion]=useState(new Set());
@@ -1215,8 +1948,73 @@ function PagoReminderModal({credito,linea,onClose}){
 }
 
 // ─── Detalle de crédito ───────────────────────────────────────────────────────
+// Cuadro de garantía dividido en dos: a la izquierda los datos de la garantía
+// (monto, si fue devuelta y fecha de entrega); a la derecha el libre de deuda
+// (si se realizó, N° y fecha de entrega). El Gestor carga; los demás lo ven.
+function GarantiaBox({credito,montoGarantia,puedeEditar,onUpdate}){
+  const inicial={
+    garantiaDevuelta:credito.garantiaDevuelta||"",garantiaFechaEntrega:credito.garantiaFechaEntrega||"",
+    libreDeudaRealizado:credito.libreDeudaRealizado||"",libreDeudaNumero:credito.libreDeudaNumero||"",libreDeudaFechaEntrega:credito.libreDeudaFechaEntrega||"",
+  };
+  const[d,setD]=useState(inicial);
+  const[guardado,setGuardado]=useState(false);
+  const set=(k,v)=>{setD(prev=>({...prev,[k]:v}));setGuardado(false);};
+  function guardar(){
+    onUpdate({...credito,garantiaDevuelta:d.garantiaDevuelta,garantiaFechaEntrega:d.garantiaFechaEntrega,
+      libreDeudaRealizado:d.libreDeudaRealizado,libreDeudaNumero:(d.libreDeudaNumero||"").trim(),libreDeudaFechaEntrega:d.libreDeudaFechaEntrega});
+    setGuardado(true);
+  }
+  const siNo=v=>v==="si"?"Sí":v==="no"?"No":"-";
+  const fecha=v=>v?fmtDate(v):"-";
+  const lbl={fontSize:10.5,color:"#5B6B63",fontWeight:700,marginBottom:3,letterSpacing:"0.02em"};
+  const valTxt={fontSize:13,color:"#000",marginBottom:10};
+  const campoSel=(k,opts)=><select style={{...iS,padding:"6px 8px",fontSize:12.5,marginBottom:10}} value={d[k]} onChange={e=>set(k,e.target.value)}>
+    <option value="">(seleccionar)</option>{opts.map(([v,t])=><option key={v} value={v}>{t}</option>)}</select>;
+  const campoFecha=(k)=><input style={{...iS,padding:"6px 8px",fontSize:12.5,marginBottom:10}} type="date" min="2000-01-01" value={d[k]} onChange={e=>set(k,e.target.value)}/>;
+  const campoTxt=(k,ph)=><input style={{...iS,padding:"6px 8px",fontSize:12.5,marginBottom:10}} value={d[k]} placeholder={ph} onChange={e=>set(k,e.target.value)}/>;
+  const caja={borderRadius:8,padding:"12px 14px",display:"flex",flexDirection:"column"};
+  return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+    <div style={{...caja,background:"#EAF3EC",border:"1px solid #2F5233"}}>
+      <div style={{fontWeight:700,fontSize:12,color:"#2F5233",marginBottom:6}}>Datos de la garantía</div>
+      <div style={{fontSize:11,color:"#2F5233",fontWeight:600}}>MONTO DE GARANTÍA (Capital + Interés financiero programado)</div>
+      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700,color:"#1F6B3A",marginTop:2}}>{money(montoGarantia)}</div>
+      <div style={{fontSize:10.5,color:"#5B6B63",marginTop:2,marginBottom:10}}>No incluye intereses moratorios ni punitorios. Corresponde a las obligaciones según el cronograma original.</div>
+      {puedeEditar?<>
+        <div style={lbl}>¿FUE DEVUELTA?</div>
+        {campoSel("garantiaDevuelta",[["si","Sí"],["no","No"]])}
+        <div style={lbl}>FECHA DE ENTREGA (DEVOLUCIÓN)</div>
+        {campoFecha("garantiaFechaEntrega")}
+      </>:<>
+        <div style={lbl}>¿FUE DEVUELTA?</div><div style={valTxt}>{siNo(credito.garantiaDevuelta)}</div>
+        <div style={lbl}>FECHA DE ENTREGA (DEVOLUCIÓN)</div><div style={valTxt}>{fecha(credito.garantiaFechaEntrega)}</div>
+      </>}
+    </div>
+    <div style={{...caja,background:"#F4F7FB",border:"1px solid #21708c"}}>
+      <div style={{fontWeight:700,fontSize:12,color:"#21708c",marginBottom:6}}>Libre de deuda</div>
+      {puedeEditar?<>
+        <div style={lbl}>¿SE REALIZÓ?</div>
+        {campoSel("libreDeudaRealizado",[["si","Sí"],["no","No"]])}
+        {d.libreDeudaRealizado==="si"&&<>
+          <div style={lbl}>N° DE LIBRE DE DEUDA</div>
+          {campoTxt("libreDeudaNumero","Ej: LD-2026-0123")}
+          <div style={lbl}>FECHA DE ENTREGA</div>
+          {campoFecha("libreDeudaFechaEntrega")}
+        </>}
+        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:"auto"}}>
+          <Boton size="sm" icon={Save} onClick={guardar}>Guardar garantía y libre de deuda</Boton>
+          {guardado&&<span style={{fontSize:12,color:"#2E7D46"}}>Guardado</span>}
+        </div>
+      </>:<>
+        <div style={lbl}>¿SE REALIZÓ?</div><div style={valTxt}>{siNo(credito.libreDeudaRealizado)}</div>
+        <div style={lbl}>N° DE LIBRE DE DEUDA</div><div style={valTxt}>{credito.libreDeudaNumero||"-"}</div>
+        <div style={lbl}>FECHA DE ENTREGA</div><div style={valTxt}>{fecha(credito.libreDeudaFechaEntrega)}</div>
+      </>}
+    </div>
+  </div>;
+}
+
 function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGoHome}){
-  const tasas=useMemo(()=>getTasas(linea),[linea]);
+  const tasas=useMemo(()=>getTasas(linea,credito),[linea,credito]);
   const filas=useMemo(()=>calcularFilas(credito,tasas),[credito,tasas]);
   const isAdmin=rol==="admin";
   const canMemo=rol==="admin"||rol==="viewer";
@@ -1225,13 +2023,15 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
   const canObs=rol==="admin"||rol==="viewer";
   // Seguimiento del crédito: lo ven solo Gestor (admin) y Consulta (viewer)
   const canSeg=rol==="admin"||rol==="viewer";
+  // Grupo de notas según el estado: En Trámite / al día o en mora / cancelado o condonado
+  const grupoNotas=(()=>{const e=estadoFinal(credito);return e==="EN_TRAMITE"?"tramite":(e==="CANCELADO"||e==="CONDONADO")?"cerrado":"activo";})();
 
   const[datos,setDatos]=useState({
     numeroContrato:credito.numeroContrato||"",email:credito.productor.email||"",
     telefono:credito.productor.telefono||"",opp:credito.opp||"",
     fuenteFinanciamiento:credito.fuenteFinanciamiento||"",
     departamento:credito.departamento||"",regionalOverride:credito.regionalOverride||"",
-    fechaContrato:credito.fechaContrato||"",
+    fechaContrato:credito.fechaContrato||"",fechaOtorgamiento:credito.fechaOtorgamiento||"",
     domicilio:credito.productor.domicilio||"",ciudad:credito.productor.ciudad||"",
     repNombre:credito.repLegal?.nombre||"",repApellido:credito.repLegal?.apellido||"",repDni:credito.repLegal?.dni||"",repTelefono:credito.repLegal?.telefono||"",
     nombreEstablecimiento:credito.nombreEstablecimiento||"",
@@ -1242,8 +2042,12 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
     ubicacionEstablecimiento:credito.ubicacionEstablecimiento||"",
     tenencia:credito.tenencia||"",
     dniCuit:credito.productor.dni||"",
+    sexo:credito.productor?.sexo||"",
+    apellido:splitNombre(credito.productor.nombre).apellido, nombreProd:splitNombre(credito.productor.nombre).nombre,
+    tasaMora:credito.tasaMora??"",tasaPunitoria:credito.tasaPunitoria??"",resolucionReglamentaria:credito.resolucionReglamentaria||"",emergencia:credito.emergencia||"",instrumentoLegal:credito.instrumentoLegal||"",inicioEmergencia:credito.inicioEmergencia||"",finEmergencia:credito.finEmergencia||"",condonacion:credito.condonacion||"",porcentajeCondonacion:credito.porcentajeCondonacion||"",instrumentoCondonacion:credito.instrumentoCondonacion||"",fechaCondonacion:credito.fechaCondonacion||"",
   });
-  const[rendOk,setRendOk]=useState(!!credito.rendicionPresentada);
+  const[rendEst,setRendEst]=useState(rendEstadoDe(credito));
+  const rendOk=rendEst!=="sin";
   const[rendFecha,setRendFecha]=useState(credito.rendicionFecha||todayStr());
   const[rendFs,setRendFs]=useState(credito.rendicionFs||"");
   const[pagoForm,setPagoForm]=useState(null);
@@ -1268,8 +2072,24 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
   // Monto de garantía = capital + interés financiero programado (sin mora/punitorio)
   const montoGarantia=r2(tots.cap+tots.int);
 
+  // Cambios sin guardar en la edición de la planilla. La fecha de otorgamiento se guarda al cambiarla, así que no cuenta.
+  const sinFecha=d=>{const {fechaOtorgamiento,...r}=d;return JSON.stringify(r);};
+  const datosIniRef=React.useRef(null);
+  if(datosIniRef.current===null)datosIniRef.current=sinFecha(datos);
+  const hayCambios=sinFecha(datos)!==datosIniRef.current;
+  const[confirmarSalida,setConfirmarSalida]=useState(null);
+  function pedirSalida(accion){ if(hayCambios){setConfirmarSalida(()=>accion);}else accion(); }
   function guardarDatos(){
-    onUpdate({...credito,numeroContrato:datos.numeroContrato,opp:datos.opp,
+    datosIniRef.current=sinFecha(datos);
+    const nuevaOtorg=datos.fechaOtorgamiento||credito.fechaOtorgamiento;
+    const otorgCambio=nuevaOtorg!==credito.fechaOtorgamiento;
+    const cuotasNuevas=otorgCambio?(credito.cuotas||[]).map(q=>({...q,fechaVencimiento:addMonths(nuevaOtorg,q.mes)})):credito.cuotas;
+    onUpdate({...credito,cuotas:cuotasNuevas,fechaOtorgamiento:nuevaOtorg,numeroContrato:datos.numeroContrato,opp:datos.opp,
+      tasaMora:numOrNull(datos.tasaMora),tasaPunitoria:numOrNull(datos.tasaPunitoria),resolucionReglamentaria:(datos.resolucionReglamentaria||"").trim(),
+      emergencia:datos.emergencia||"",instrumentoLegal:(datos.instrumentoLegal||"").trim(),
+      inicioEmergencia:datos.inicioEmergencia||"",finEmergencia:datos.finEmergencia||"",
+      condonacion:datos.condonacion||"",porcentajeCondonacion:datos.porcentajeCondonacion||"",instrumentoCondonacion:(datos.instrumentoCondonacion||"").trim(),fechaCondonacion:datos.fechaCondonacion||"",
+      situacion:situacionTrasCambio(credito,{emergencia:datos.emergencia,condonacion:datos.condonacion,porcentaje:datos.porcentajeCondonacion}),
       fuenteFinanciamiento:datos.fuenteFinanciamiento,departamento:datos.departamento,
       regionalOverride:datos.regionalOverride,fechaContrato:datos.fechaContrato,
       repLegal:{nombre:datos.repNombre,apellido:datos.repApellido,dni:datos.repDni,telefono:datos.repTelefono},
@@ -1283,9 +2103,9 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       asociacionNombre:datos.asociadoAsociacion==="si"?(datos.asociacionNombre||"").trim():"",
       ubicacionEstablecimiento:datos.ubicacionEstablecimiento,
       tenencia:datos.tenencia,
-      productor:{...credito.productor,email:datos.email,telefono:datos.telefono,domicilio:datos.domicilio,ciudad:datos.ciudad,dni:datos.dniCuit}});
+      productor:{...credito.productor,nombre:unirNombre(datos.apellido,datos.nombreProd),email:datos.email,telefono:datos.telefono,domicilio:datos.domicilio,ciudad:datos.ciudad,dni:datos.dniCuit,sexo:datos.sexo}});
   }
-  function guardarRend(){onUpdate({...credito,rendicionPresentada:rendOk,rendicionFecha:rendOk?rendFecha:null,rendicionFs:rendOk?rendFs:""});}
+  function guardarRend(){onUpdate({...credito,rendicionEstado:rendEst,rendicionPresentada:rendEst!=="sin",rendicionFecha:rendOk?rendFecha:null,rendicionFs:rendOk?rendFs:""});}
   function toggleCancelado(){onUpdate({...credito,canceladoManual:!credito.canceladoManual});}
   function agregarObs(){
     if(!nuevaObs.texto.trim())return;
@@ -1370,7 +2190,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
           pagos:[...(c.pagos||[]),{fecha:pagoForm.fecha,monto:aplicar,folio:pagoForm.folio,tipo:tipoPago,mesOrigen:c.mes}]};
       })};
     }
-    const tasas=getTasas(linea);
+    const tasas=getTasas(linea,credito);
     let res=aplicarAMoraPunitorio(cuotas,"mora",pagoForm.montoMora,tasas); cuotas=res.cuotas;
     res=aplicarAMoraPunitorio(cuotas,"punitorio",pagoForm.montoPunitorio,tasas); cuotas=res.cuotas;
 
@@ -1460,7 +2280,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       {/* Cabecera */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <Boton size="lg" icon={Home} onClick={onGoHome}>Ir a Estado</Boton>
+          <Boton size="lg" icon={Home} onClick={()=>pedirSalida(onGoHome)}>Ir a Estado</Boton>
           <div>
             <div style={{display:"flex",alignItems:"baseline",gap:8}}>
               <span style={{fontSize:20,color:"#000",fontWeight:800,letterSpacing:"0.01em"}}>EXPEDIENTE</span>
@@ -1474,14 +2294,14 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
           <button onClick={()=>setMaximizado(m=>!m)} title={maximizado?"Restaurar tamaño":"Maximizar ventana"} style={{background:"transparent",border:"1px solid #DCD6C2",borderRadius:7,cursor:"pointer",color:"#5B6B63",padding:"6px 8px",display:"flex",alignItems:"center"}}>
             {maximizado?<Minimize2 size={16}/>:<Maximize2 size={16}/>}
           </button>
-          <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+          <button onClick={()=>pedirSalida(onClose)} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
         </div>
       </div>
 
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        <EstadoBadge estado={estado}/>
+        <EstadoBadge estado={estadoFinal(credito)}/>
         <SituacionBadge valor={credito.situacion} editable={isAdmin} onChange={v=>onUpdate({...credito,situacion:v})}/>
-        <RendicionBadge ok={!!credito.rendicionPresentada}/>
+        <RendicionBadge estado={rendEstadoVisual(credito)}/>
         <span style={{fontSize:20,color:"#000",fontWeight:800,letterSpacing:"0.01em",display:"inline-flex",alignItems:"center",gap:6}}><MapPin size={20} color="#000"/>{regional==="Sin asignar"?"Sin regional":REGIONALES_NOMBRE[regional]||regional}</span>
         {credito.esAsociado&&<span style={{fontSize:11.5,background:"#EAF3EC",color:"#1F6B3A",border:"1px solid #1F6B3A",borderRadius:12,padding:"2px 8px",fontWeight:600}}>Asociado / Cooperativa</span>}
       </div>
@@ -1489,7 +2309,10 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       {/* Zona 1 · Datos personales */}
       <ZonaPlanilla n="1" titulo="Datos personales">
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:13}}>
+          <InfoRow label="Apellido" value={splitNombre(credito.productor.nombre).apellido}/>
+          <InfoRow label="Nombre" value={splitNombre(credito.productor.nombre).nombre}/>
           <InfoRow label="DNI / CUIT" value={credito.productor.dni}/>
+          {isAdmin&&<InfoRow label="Género" value={credito.productor?.sexo==="F"?"Femenino":credito.productor?.sexo==="M"?"Masculino":null}/>}
           <InfoRow label="Domicilio" value={`${credito.productor.domicilio||""}, ${credito.productor.ciudad||""}`}/>
           <InfoRow label="Correo electrónico" value={credito.productor.email}/>
           <InfoRow label="Teléfono" value={credito.productor.telefono}/>
@@ -1545,31 +2368,36 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
           <InfoRow label="Fecha de otorgamiento" value={fmtDate(credito.fechaOtorgamiento)}/>
           <InfoRow label="Fecha de contrato" value={fmtDate(credito.fechaContrato)}/>
           <InfoRow label="Monto otorgado" value={money(credito.monto)}/>
-          <InfoRow label={`Tasa aplicada${credito.esAsociado?" (asociado)":""}`} value={`${credito.tasaAplicada||linea?.tasaFinanciera||20}% anual`}/>
+          <InfoRow label={`Tasa de interés financiera${credito.esAsociado?" (asociado)":""}`} value={`${credito.tasaAplicada||linea?.tasaFinanciera||20}% anual`}/>
+          <InfoRow label="Tasa de interés por mora" value={`${getTasas(linea,credito).mora}% anual`}/>
+          <InfoRow label="Tasa de interés punitoria" value={`${getTasas(linea,credito).punitorio}% anual`}/>
+          <InfoRow label="Resolución reglamentaria" value={credito.resolucionReglamentaria}/>
+          <InfoRow label="Estado de la rendición" value={<RendicionBadge estado={rendEstadoVisual(credito)}/>}/>
+          <InfoRow label="N° de Fs. (rendición)" value={credito.rendicionPresentada?credito.rendicionFs:null}/>
+          <InfoRow label="Fecha de presentación (rendición)" value={credito.rendicionPresentada?fmtDate(credito.rendicionFecha):null}/>
+          <InfoRow label="Emergencia" value={credito.emergencia==="si"?"Sí":credito.emergencia==="no"?"No":null}/>
+          <InfoRow label="Instrumento legal" value={credito.instrumentoLegal}/>
+          <InfoRow label="Inicio de la emergencia" value={credito.inicioEmergencia?fmtDate(credito.inicioEmergencia):null}/>
+          <InfoRow label="Fin de la emergencia" value={credito.finEmergencia?fmtDate(credito.finEmergencia):null}/>
+          <InfoRow label="Condonación" value={credito.condonacion==="si"?"Sí":credito.condonacion==="no"?"No":null}/>
+          <InfoRow label="% de condonación" value={credito.condonacion==="si"&&credito.porcentajeCondonacion?`${credito.porcentajeCondonacion}%`:null}/>
+          <InfoRow label="Instrumento legal (condonación)" value={credito.instrumentoCondonacion}/>
+          <InfoRow label="Fecha de la condonación" value={credito.fechaCondonacion?fmtDate(credito.fechaCondonacion):null}/>
           <InfoRow label="Contrato" value={credito.numeroContrato}/>
           <InfoRow label="OPP" value={credito.opp}/>
           <InfoRow label="Fuente financiamiento" value={credito.fuenteFinanciamiento}/>
           <InfoRow label="Cuenta cobros" value={linea?.numeroCuenta?`${linea.numeroCuenta} · CBU ${linea.cbu}`:"(no informada)"}/>
-          <InfoRow label="N° de Fs. (rendición)" value={credito.rendicionPresentada?credito.rendicionFs:null}/>
-          <InfoRow label="Fecha de presentación (rendición)" value={credito.rendicionPresentada?fmtDate(credito.rendicionFecha):null}/>
         </div>
       </ZonaPlanilla>
 
       {/* Zona 4 · Seguimiento del crédito (solo Gestor y Consulta) */}
       {canSeg&&<ZonaPlanilla n="4" titulo="Seguimiento del crédito">
-        <SeguimientoCredito credito={credito} puedeEditar={isAdmin} onUpdate={onUpdate}/>
+        <SeguimientoCredito credito={credito} puedeEditar={canSeg} puedeEliminar={isAdmin} onUpdate={onUpdate}/>
       </ZonaPlanilla>}
       {selectorParcela&&<SelectorParcelaModal credito={credito} enfocar={selectorParcela.enfocar}
         soloLectura={selectorParcela.soloLectura} onAsignar={asignarParcela} onClose={()=>setSelectorParcela(null)}/>}
 
-      {/* Monto de garantía */}
-      <div style={{background:"#EAF3EC",border:"1px solid #2F5233",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div>
-          <div style={{fontSize:11,color:"#2F5233",fontWeight:600}}>MONTO DE GARANTÍA (Capital + Interés financiero programado)</div>
-          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:20,fontWeight:700,color:"#1F6B3A"}}>{money(montoGarantia)}</div>
-        </div>
-        <div style={{fontSize:11,color:"#5B6B63",maxWidth:200,textAlign:"right"}}>No incluye intereses moratorios ni punitorios. Corresponde a las obligaciones según el cronograma original.</div>
-      </div>
+      {(estadoFinal(credito)==="CANCELADO"||estadoFinal(credito)==="CONDONADO")&&<GarantiaBox credito={credito} montoGarantia={montoGarantia} puedeEditar={canSeg} onUpdate={onUpdate}/>}
 
       {/* Botones admin y notas */}
       {isAdmin&&<div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
@@ -1585,9 +2413,18 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       </div>}
       {canMemo&&<div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <Boton size="sm" icon={Bell} onClick={()=>setShowPago(true)}>Aviso de cuotas</Boton>
-        <Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("contable")}>Nota Dirección Contable</Boton>
-        <Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("tesoreriaPago")}>Nota Tesorería – Pago</Boton>
-        <Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("tesoreriaGarantia")}>Nota Tesorería – Garantía</Boton>
+        {grupoNotas==="tramite"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("contable")}>Nota Dirección Contable</Boton>}
+        {grupoNotas==="activo"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("tesoreriaPago")}>Nota Tesorería – Pago</Boton>}
+        {grupoNotas==="cerrado"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("tesoreriaGarantia")}>Nota Tesorería – Garantía</Boton>}
+        {grupoNotas==="activo"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("intimacion")}>Nota Intimación</Boton>}
+        {grupoNotas==="tramite"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("contrato")}>Contrato</Boton>}
+        {grupoNotas==="cerrado"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("libreDeuda")}>Libre de Deuda</Boton>}
+        {grupoNotas==="activo"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("cronograma")}>Cronograma de cuotas</Boton>}
+        {grupoNotas==="tramite"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("registro")}>NOTA REGISTRO</Boton>}
+        {grupoNotas==="tramite"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("regionalFirma")}>Nota Regional Firma</Boton>}
+        {grupoNotas==="activo"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("directoEntrega")}>Nota Directo Entregar Contrato</Boton>}
+        {grupoNotas==="tramite"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("memoOpp")}>MEMO OPP</Boton>}
+        {grupoNotas==="activo"&&<Boton size="sm" icon={FileSignature} variant="outline" onClick={()=>setShowMemo("cartaDocumento")}>Carta Documento</Boton>}
       </div>}
 
       <div style={{height:1,background:"#EEE9D9",margin:"14px 0"}}/>
@@ -1597,6 +2434,9 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <div style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#F0ECDD",borderLeft:"4px solid var(--color-primary)",borderRadius:4,marginTop:0}}><ZonaTitulo n="1" titulo="Datos personales"/></div>
         <Campo label="DNI / CUIT"><input style={iS} value={datos.dniCuit} onChange={e=>setDatos({...datos,dniCuit:e.target.value})} placeholder="Ej: 28456123 o 30-71234567-8"/></Campo>
+        <Campo label="Apellido"><input style={iS} value={datos.apellido} onChange={e=>setDatos({...datos,apellido:e.target.value})}/></Campo>
+        <Campo label="Nombre"><input style={iS} value={datos.nombreProd} onChange={e=>setDatos({...datos,nombreProd:e.target.value})}/></Campo>
+        <Campo label="Género"><select style={iS} value={datos.sexo} onChange={e=>setDatos({...datos,sexo:e.target.value})}><option value="">(seleccionar)</option><option value="F">Femenino</option><option value="M">Masculino</option></select></Campo>
         <Campo label="Domicilio (calle, número, paraje, etc.)">
           <input style={iS} value={datos.domicilio} onChange={e=>setDatos({...datos,domicilio:e.target.value})} placeholder="Ej: Ruta 40 s/n, Lote 14"/>
         </Campo>
@@ -1639,22 +2479,40 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
         <AsociacionInput valor={datos.asociadoAsociacion} nombre={datos.asociacionNombre} onValor={v=>setDatos({...datos,asociadoAsociacion:v})} onNombre={v=>setDatos({...datos,asociacionNombre:v})}/>
         <div style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#F0ECDD",borderLeft:"4px solid var(--color-primary)",borderRadius:4,marginTop:4}}><ZonaTitulo n="3" titulo="Datos del crédito"/></div>
         <Campo label="N° de contrato"><input style={iS} value={datos.numeroContrato} onChange={e=>setDatos({...datos,numeroContrato:e.target.value})}/></Campo>
+        <Campo label="Tasa de interés por mora (% anual)"><input style={iS} type="number" step="0.01" min="0" value={datos.tasaMora} onChange={e=>setDatos({...datos,tasaMora:e.target.value})} placeholder="Vacío = tasa de la línea"/></Campo>
+        <Campo label="Tasa de interés punitoria (% anual)"><input style={iS} type="number" step="0.01" min="0" value={datos.tasaPunitoria} onChange={e=>setDatos({...datos,tasaPunitoria:e.target.value})} placeholder="Vacío = tasa de la línea"/></Campo>
+        <Campo label="Resolución reglamentaria"><input style={iS} value={datos.resolucionReglamentaria} onChange={e=>setDatos({...datos,resolucionReglamentaria:e.target.value})} placeholder="Ej: Res. N° 50/2025-MP"/></Campo>
+        <Campo label="Emergencia"><select style={iS} value={datos.emergencia} onChange={e=>setDatos({...datos,emergencia:e.target.value})}><option value="">(seleccionar)</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+        <Campo label="Instrumento legal"><input style={iS} value={datos.instrumentoLegal} onChange={e=>setDatos({...datos,instrumentoLegal:e.target.value})} placeholder="Ej: Decreto N° 123/2026"/></Campo>
+        <Campo label="Inicio de la emergencia"><input style={iS} type="date" min="2000-01-01" value={datos.inicioEmergencia} onChange={e=>setDatos({...datos,inicioEmergencia:e.target.value})}/></Campo>
+        <Campo label="Fin de la emergencia"><input style={iS} type="date" min="2000-01-01" value={datos.finEmergencia} onChange={e=>setDatos({...datos,finEmergencia:e.target.value})}/></Campo>
+        <Campo label="Condonación"><select style={iS} value={datos.condonacion} onChange={e=>setDatos({...datos,condonacion:e.target.value})}><option value="">(seleccionar)</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+        <Campo label="% de condonación"><select style={iS} value={datos.porcentajeCondonacion} onChange={e=>setDatos({...datos,porcentajeCondonacion:e.target.value})}><option value="">(seleccionar)</option><option value="50">50 %</option><option value="100">100 %</option></select></Campo>
+        <Campo label="Instrumento legal (condonación)"><input style={iS} value={datos.instrumentoCondonacion} onChange={e=>setDatos({...datos,instrumentoCondonacion:e.target.value})} placeholder="Ej: Resolución N° 45/2026"/></Campo>
+        <Campo label="Fecha de la condonación"><input style={iS} type="date" min="2000-01-01" value={datos.fechaCondonacion} onChange={e=>setDatos({...datos,fechaCondonacion:e.target.value})}/></Campo>
         <Campo label="Fecha de contrato"><input style={iS} type="date" min="2000-01-01" value={datos.fechaContrato} onChange={e=>setDatos({...datos,fechaContrato:e.target.value})}/></Campo>
+        <Campo label="Fecha de otorgamiento"><input style={iS} type="date" min="2000-01-01" value={datos.fechaOtorgamiento} onChange={e=>{
+          const v=e.target.value; setDatos({...datos,fechaOtorgamiento:v});
+          // al cambiar la fecha se recalculan de inmediato los vencimientos de la liquidación (los pagos no se tocan)
+          if(v&&v!==credito.fechaOtorgamiento){onUpdate({...credito,fechaOtorgamiento:v,cuotas:(credito.cuotas||[]).map(q=>({...q,fechaVencimiento:addMonths(v,q.mes)}))});}
+        }}/></Campo>
         <Campo label="OPP"><input style={iS} value={datos.opp} onChange={e=>setDatos({...datos,opp:e.target.value})}/></Campo>
         <Campo label="Fuente de financiamiento"><FuenteInput listId={`f-${credito.id}`} value={datos.fuenteFinanciamiento} onChange={v=>setDatos({...datos,fuenteFinanciamiento:v})}/></Campo>
       </div>
-      <Boton size="sm" icon={Save} onClick={guardarDatos}>Guardar datos</Boton>
+      <Boton size="sm" icon={Save} onClick={()=>setConfirmarSalida(()=>onClose)}>Guardar datos</Boton>{hayCambios&&<span style={{fontSize:12,color:"#A23B2E",marginLeft:10,fontWeight:600}}>Hay cambios sin guardar</span>}
       <div style={{height:1,background:"#EEE9D9",margin:"14px 0"}}/></>}
 
+      {/* Rendición y cronograma: no se muestran mientras el crédito esté En trámite */}
+      {estadoFinal(credito)!=="EN_TRAMITE"&&<>
       {/* Rendición */}
       <div style={{fontWeight:700,color:"var(--color-titulo)",fontSize:13.5,marginBottom:6}}>Rendición de la inversión</div>
-      <div style={{fontSize:11.5,color:"#9A9482",marginBottom:8}}>Plazo máximo: 90 días desde el otorgamiento (vence el {fmtDate(vencRend)}).</div>
+      <div style={{fontSize:11.5,color:"#9A9482",marginBottom:8}}>Plazo máximo: 90 días desde la fecha de otorgamiento (vence el {fmtDate(vencRend)}).</div>
       {isAdmin?<div style={{display:"flex",gap:14,alignItems:"flex-end",flexWrap:"wrap"}}>
-        <Campo label="¿Presentó la rendición?"><select style={{...iS,width:160}} value={rendOk?"si":"no"} onChange={e=>setRendOk(e.target.value==="si")}><option value="no">No presentó</option><option value="si">Sí presentó</option></select></Campo>
+        <Campo label="Estado de la rendición"><select style={{...iS,width:200}} value={rendEst} onChange={e=>setRendEst(e.target.value)}>{REND_ESTADOS.map(e=><option key={e.id} value={e.id}>{e.label}</option>)}</select></Campo>
         {rendOk&&<Campo label="Fecha de presentación"><input style={{...iS,width:160}} type="date" min="2000-01-01" value={rendFecha} onChange={e=>setRendFecha(e.target.value)}/></Campo>}
         {rendOk&&<Campo label="N° de Fs. (expediente)"><input style={{...iS,width:140}} value={rendFs} onChange={e=>setRendFs(e.target.value)} placeholder="Ej: Fs. 45"/></Campo>}
         <div style={{paddingBottom:12}}><Boton size="sm" icon={Save} onClick={guardarRend}>Guardar rendición</Boton></div>
-      </div>:<div><RendicionBadge ok={!!credito.rendicionPresentada}/>{credito.rendicionPresentada&&credito.rendicionFs&&<div style={{fontSize:11.5,color:"#8A8470",marginTop:4}}>N° de Fs.: {credito.rendicionFs}</div>}</div>}
+      </div>:<div><RendicionBadge estado={rendEstadoVisual(credito)}/>{credito.rendicionPresentada&&credito.rendicionFs&&<div style={{fontSize:11.5,color:"#8A8470",marginTop:4}}>N° de Fs.: {credito.rendicionFs}</div>}</div>}
 
       <div style={{height:1,background:"#EEE9D9",margin:"14px 0"}}/>
 
@@ -1787,6 +2645,8 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
         </table>
       </div>
 
+      </>}
+      {estadoFinal(credito)!=="EN_TRAMITE"&&<>
       {/* Resumen de deuda */}
       <div style={{marginTop:12,background:tots.totalAdeudado>0?"#FFF3F0":"#F4F9F4",border:`1px solid ${tots.totalAdeudado>0?"var(--color-danger)":"var(--color-success)"}`,borderRadius:8,padding:"10px 14px",display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8,fontSize:12}}>
         <div><div style={{color:"#8A8470",fontSize:10}}>Capital pendiente</div><div style={{fontFamily:"monospace",fontWeight:700}}>{money(tots.pendCap)}</div></div>
@@ -1801,6 +2661,7 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
         <div><div style={{color:"#8A8470",fontSize:10}}>TOTAL ADEUDADO</div><div style={{fontFamily:"monospace",fontWeight:700,fontSize:15,color:tots.totalAdeudado>0?"var(--color-danger)":"var(--color-success)"}}>{money(tots.totalAdeudado)}</div></div>
       </div>
 
+      </>}
       {canObs&&<>
       <div style={{height:1,background:"#EEE9D9",margin:"16px 0"}}/>
 
@@ -1824,6 +2685,17 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
       </>}
     </div>
 
+    {confirmarSalida&&<div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:120,padding:16}}>
+      <div style={{background:"#fff",borderRadius:12,width:440,maxWidth:"100%",padding:"20px 22px",boxShadow:"0 20px 60px rgba(0,0,0,0.25)"}}>
+        <div style={{fontWeight:700,fontSize:15,color:"var(--color-titulo)",marginBottom:8}}>Hay cambios sin guardar</div>
+        <div style={{fontSize:13,color:"#5B6B63",marginBottom:16}}>¿Querés guardar los cambios de la planilla antes de salir?</div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+          <Boton variant="outline" onClick={()=>setConfirmarSalida(null)}>Seguir editando</Boton>
+          <Boton variant="outline" onClick={()=>{const acc=confirmarSalida;setConfirmarSalida(null);acc();}}>Salir sin guardar</Boton>
+          <Boton icon={Save} onClick={()=>{guardarDatos();const acc=confirmarSalida;setConfirmarSalida(null);acc();}}>Guardar y salir</Boton>
+        </div>
+      </div>
+    </div>}
     {showMemo&&<MemoModal key={showMemo} tipo={showMemo} credito={credito} linea={linea} tots={tots} config={config} onClose={()=>setShowMemo(null)}/>}
     {showPago&&<PagoReminderModal credito={credito} linea={linea} onClose={()=>setShowPago(false)}/>}
   </div>;
@@ -1831,12 +2703,13 @@ function CreditoDetalle({credito,linea,rol,config,onClose,onUpdate,onDelete,onGo
 
 // ─── Nuevo crédito ────────────────────────────────────────────────────────────
 const FORM_INITIAL = {
-  expediente:"",numeroContrato:"",fechaContrato:"",nombre:"",dni:"",
+  expediente:"",numeroContrato:"",fechaContrato:"",nombre:"",dni:"",sexo:"",
   domicilio:"",ciudad:"",email:"",telefono:"",opp:"",
   fuenteFinanciamiento:"",departamento:"",regionalOverride:"",
   fechaOtorgamiento:"",
   repNombre:"",repApellido:"",repDni:"",repTelefono:"",tieneRepLegal:false,
   nombreEstablecimiento:"",ubicacionEstablecimiento:"",tenencia:"",numeroRenspa:"",
+  tasaFinanciera:"",tasaMora:"",tasaPunitoria:"",resolucionReglamentaria:"",emergencia:"",instrumentoLegal:"",inicioEmergencia:"",finEmergencia:"",condonacion:"",porcentajeCondonacion:"",instrumentoCondonacion:"",fechaCondonacion:"",
   actividadPrincipal:"",estacionesActividad:[],estacionesEgresos:[],estacionesIngresos:[],asociadoAsociacion:"",asociacionNombre:"",
 };
 const CONDICIONES_TENENCIA = ["Propietario/a","Arrendatario/a","Comodatario/a","Poseedor/a","Ocupante","Otra"];
@@ -1882,7 +2755,7 @@ function NuevoCreditoForm({lineas,onCreate}){
       return d&&Number(dc.monto)>0;
     }).map(dc=>{
       const d=findDestino(linea,dc.destinoId);
-      const tasa=dc.esAsociado?(linea.tasaFinancieraAsociado||15):(linea.tasaFinanciera||20);
+      const tasa=numOrNull(form.tasaFinanciera)??(dc.esAsociado?(linea.tasaFinancieraAsociado||15):(linea.tasaFinanciera||20));
       return{destinoId:dc.destinoId,monto:Number(dc.monto),mesesCuotas:d.mesesCuotas,tasaAplicada:tasa,periodicidad:linea.periodicidadInteres};
     });
     if(!dcs.length)return[];
@@ -1897,12 +2770,15 @@ function NuevoCreditoForm({lineas,onCreate}){
       int:ints.find(c=>c.mes===mes)||null,
       nCaps:caps.length,nInts:ints.length,
     }));
-  },[linea,destinosList,form.fechaOtorgamiento]);
+  },[linea,destinosList,form.fechaOtorgamiento,form.tasaFinanciera]);
 
   const previewTotalCap=preview.reduce((s,f)=>s+(f.cap?.monto||0),0);
   const previewTotalInt=preview.reduce((s,f)=>s+(f.int?.monto||0),0);
 
   function submit(){
+    if(!form.sexo){setMsg("Indicá el género del productor (Femenino o Masculino): las notas y el contrato se adecuan según ese dato.");return;}
+    if(form.condonacion==="si"&&!form.porcentajeCondonacion){setMsg("Si el crédito está condonado, indicá el porcentaje de condonación.");return;}
+    if(form.inicioEmergencia&&form.finEmergencia&&form.finEmergencia<form.inicioEmergencia){setMsg("La fecha de fin de la emergencia no puede ser anterior a la de inicio.");return;}
     const l=lineas.find(x=>x.id===lineaId);
     if(!l||!form.nombre||!form.fechaOtorgamiento){setMsg("Completá línea, datos del productor y fecha de otorgamiento.");return;}
     const dcsValidos=destinosList.filter(dc=>{
@@ -1912,7 +2788,7 @@ function NuevoCreditoForm({lineas,onCreate}){
     if(!dcsValidos.length){setMsg("Agregá al menos un destino con monto válido.");return;}
     const destinosCredito=dcsValidos.map(dc=>{
       const d=findDestino(l,dc.destinoId);
-      const tasa=dc.esAsociado?(l.tasaFinancieraAsociado||15):(l.tasaFinanciera||20);
+      const tasa=numOrNull(form.tasaFinanciera)??(dc.esAsociado?(l.tasaFinancieraAsociado||15):(l.tasaFinanciera||20));
       return{destinoId:dc.destinoId,detalleDestino:dc.detalleDestino||d.nombre,monto:Number(dc.monto),mesesCuotas:d.mesesCuotas,tasaAplicada:tasa,esAsociado:dc.esAsociado,periodicidad:l.periodicidadInteres};
     });
     const totalM=r2(destinosCredito.reduce((s,d)=>s+d.monto,0));
@@ -1929,6 +2805,12 @@ function NuevoCreditoForm({lineas,onCreate}){
       destinosCredito,// breakdown completo
       esAsociado:dcsValidos.some(d=>d.esAsociado),
       tasaAplicada:destinosCredito[0].tasaAplicada,repLegal,
+      tasaMora:numOrNull(form.tasaMora),tasaPunitoria:numOrNull(form.tasaPunitoria),
+      resolucionReglamentaria:(form.resolucionReglamentaria||"").trim(),
+      emergencia:form.emergencia||"",instrumentoLegal:(form.instrumentoLegal||"").trim(),
+      situacion:situacionTrasCambio({situacion:undefined,emergencia:"",condonacion:""},{emergencia:form.emergencia,condonacion:form.condonacion,porcentaje:form.porcentajeCondonacion}),
+      condonacion:form.condonacion||"",porcentajeCondonacion:form.porcentajeCondonacion||"",instrumentoCondonacion:(form.instrumentoCondonacion||"").trim(),fechaCondonacion:form.fechaCondonacion||"",
+      inicioEmergencia:form.inicioEmergencia||"",finEmergencia:form.finEmergencia||"",
       nombreEstablecimiento:form.nombreEstablecimiento,
       numeroRenspa:(form.numeroRenspa||"").trim(),
       actividadPrincipal:(form.actividadPrincipal||"").trim(),
@@ -1939,7 +2821,7 @@ function NuevoCreditoForm({lineas,onCreate}){
       asociacionNombre:form.asociadoAsociacion==="si"?(form.asociacionNombre||"").trim():"",
       ubicacionEstablecimiento:form.ubicacionEstablecimiento,
       tenencia:form.tenencia,
-      productor:{nombre:form.nombre,dni:form.dni,domicilio:form.domicilio,ciudad:form.ciudad,email:form.email,telefono:form.telefono},
+      productor:{nombre:form.nombre,dni:form.dni,sexo:form.sexo||"",domicilio:form.domicilio,ciudad:form.ciudad,email:form.email,telefono:form.telefono},
       monto:totalM,fechaOtorgamiento:form.fechaOtorgamiento,
       observaciones:[],rendicionPresentada:false,rendicionFecha:null,canceladoManual:false,cuotas,
     };
@@ -1958,6 +2840,7 @@ function NuevoCreditoForm({lineas,onCreate}){
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
         <Campo label="Apellido y nombre / Razón social"><input style={iS} value={form.nombre} onChange={e=>set("nombre",e.target.value)}/></Campo>
         <Campo label="DNI / CUIT"><input style={iS} value={form.dni} onChange={e=>set("dni",e.target.value)}/></Campo>
+        <Campo label="Género"><select style={iS} value={form.sexo} onChange={e=>set("sexo",e.target.value)}><option value="">(seleccionar)</option><option value="F">Femenino</option><option value="M">Masculino</option></select></Campo>
         <Campo label="Domicilio"><input style={iS} value={form.domicilio} onChange={e=>set("domicilio",e.target.value)}/></Campo>
         <Campo label="Ciudad (auto-completa departamento y regional)">
           <SelectCiudad value={form.ciudad} onChange={v=>{const info=infoDeCiudad(v);setForm(f=>({...f,ciudad:v,departamento:info.departamento,regionalOverride:""}));}}/>
@@ -1998,6 +2881,22 @@ function NuevoCreditoForm({lineas,onCreate}){
         </div>}
       </div>
 
+      {/* Condiciones del crédito */}
+      <div style={{fontWeight:700,fontSize:13.5,color:"#23362B",marginBottom:10}}>Condiciones del crédito</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+        <Campo label="Tasa de interés financiera (% anual)"><input style={iS} type="number" step="0.01" min="0" value={form.tasaFinanciera} onChange={e=>set("tasaFinanciera",e.target.value)} placeholder="Vacío = tasa de la línea"/></Campo>
+        <Campo label="Tasa de interés por mora (% anual)"><input style={iS} type="number" step="0.01" min="0" value={form.tasaMora} onChange={e=>set("tasaMora",e.target.value)} placeholder="Vacío = tasa de la línea"/></Campo>
+        <Campo label="Tasa de interés punitoria (% anual)"><input style={iS} type="number" step="0.01" min="0" value={form.tasaPunitoria} onChange={e=>set("tasaPunitoria",e.target.value)} placeholder="Vacío = tasa de la línea"/></Campo>
+        <Campo label="Resolución reglamentaria"><input style={iS} value={form.resolucionReglamentaria} onChange={e=>set("resolucionReglamentaria",e.target.value)} placeholder="Ej: Res. N° 50/2025-MP"/></Campo>
+        <Campo label="Emergencia"><select style={iS} value={form.emergencia} onChange={e=>set("emergencia",e.target.value)}><option value="">(seleccionar)</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+        <Campo label="Instrumento legal"><input style={iS} value={form.instrumentoLegal} onChange={e=>set("instrumentoLegal",e.target.value)} placeholder="Ej: Decreto N° 123/2026"/></Campo>
+        <Campo label="Inicio de la emergencia"><input style={iS} type="date" min="2000-01-01" value={form.inicioEmergencia} onChange={e=>set("inicioEmergencia",e.target.value)}/></Campo>
+        <Campo label="Fin de la emergencia"><input style={iS} type="date" min="2000-01-01" value={form.finEmergencia} onChange={e=>set("finEmergencia",e.target.value)}/></Campo>
+        <Campo label="Condonación"><select style={iS} value={form.condonacion} onChange={e=>set("condonacion",e.target.value)}><option value="">(seleccionar)</option><option value="si">Sí</option><option value="no">No</option></select></Campo>
+        <Campo label="% de condonación"><select style={iS} value={form.porcentajeCondonacion} onChange={e=>set("porcentajeCondonacion",e.target.value)}><option value="">(seleccionar)</option><option value="50">50 %</option><option value="100">100 %</option></select></Campo>
+        <Campo label="Instrumento legal (condonación)"><input style={iS} value={form.instrumentoCondonacion} onChange={e=>set("instrumentoCondonacion",e.target.value)} placeholder="Ej: Resolución N° 45/2026"/></Campo>
+        <Campo label="Fecha de la condonación"><input style={iS} type="date" min="2000-01-01" value={form.fechaCondonacion} onChange={e=>set("fechaCondonacion",e.target.value)}/></Campo>
+      </div>
       {/* Datos administrativos */}
       <div style={{fontWeight:700,fontSize:13.5,color:"#23362B",marginBottom:10}}>Datos administrativos</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
@@ -2100,6 +2999,112 @@ function NuevoCreditoForm({lineas,onCreate}){
 }
 
 // ─── Líneas de crédito ────────────────────────────────────────────────────────
+// ── Plantillas de notas con formato (texto enriquecido) ─────────────────────
+function escHtmlT(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+// Pasa una plantilla en texto simple a HTML (las plantillas con formato ya son HTML)
+function plantillaAHtml(t){
+  if(/^\s*</.test(t||""))return t;
+  return String(t||"").split("\n").map(x=>`<div>${escHtmlT(x)||"&nbsp;"}</div>`).join("");
+}
+// Editor de plantillas: barra de formato, tabulador y regla de sangrías. Carga el contenido una sola vez.
+const REGLA_MM=170;
+function RichTemplateEditor({valorInicial,onChange}){
+  const ref=React.useRef(null);
+  const regla=React.useRef(null);
+  const[sg,setSg]=useState({izq:0,pri:0});
+  React.useEffect(()=>{ if(ref.current&&ref.current.innerHTML==="")ref.current.innerHTML=valorInicial; },[]);
+  const emitir=()=>onChange(ref.current?ref.current.innerHTML:"");
+  const cmd=(c,v=null)=>{ if(!ref.current)return; ref.current.focus(); document.execCommand(c,false,v); emitir(); };
+  const tam=pt=>{
+    if(!ref.current)return; ref.current.focus();
+    document.execCommand("fontSize",false,"7");
+    ref.current.querySelectorAll('font[size="7"]').forEach(f=>{const s=document.createElement("span"); s.style.fontSize=pt+"pt"; s.innerHTML=f.innerHTML; f.replaceWith(s);});
+    emitir();
+  };
+  // Párrafo (bloque) donde está el cursor
+  function bloqueActual(){
+    const sel=window.getSelection(); if(!sel||!sel.anchorNode||!ref.current)return null;
+    let n=sel.anchorNode; if(n.nodeType===3)n=n.parentNode;
+    while(n&&n.parentNode!==ref.current&&n!==ref.current)n=n.parentNode;
+    return(!n||n===ref.current)?null:n;
+  }
+  function leerSangria(){
+    const b=bloqueActual(); if(!b){setSg({izq:0,pri:0});return;}
+    const izq=parseFloat(b.style.marginLeft)||0, ti=parseFloat(b.style.textIndent)||0;
+    setSg({izq,pri:izq+ti});
+  }
+  function aplicarEn(b,izq,pri){
+    b.style.marginLeft=izq>0?izq+"mm":"";
+    b.style.textIndent=(pri-izq)!==0?(pri-izq)+"mm":"";
+    setSg({izq,pri}); emitir();
+  }
+  function arrastrar(tipo,e){
+    e.preventDefault();
+    const b=bloqueActual(); if(!b||!regla.current)return;
+    const rect=regla.current.getBoundingClientRect();
+    const izq0=parseFloat(b.style.marginLeft)||0;
+    let actual={izq:izq0,pri:izq0+(parseFloat(b.style.textIndent)||0)};
+    const mover=ev=>{
+      const mm=Math.max(0,Math.min(REGLA_MM,Math.round((ev.clientX-rect.left)/rect.width*REGLA_MM*2)/2));
+      actual=tipo==="izq"?{izq:mm,pri:actual.pri}:{izq:actual.izq,pri:mm};
+      aplicarEn(b,actual.izq,actual.pri);
+    };
+    const soltar=()=>{window.removeEventListener("pointermove",mover); window.removeEventListener("pointerup",soltar);};
+    window.addEventListener("pointermove",mover); window.addEventListener("pointerup",soltar);
+  }
+  const boton=(label,fn,st={})=><button type="button" onMouseDown={e=>e.preventDefault()} onClick={fn} style={{padding:"3px 7px",fontSize:12,background:"#F0ECDD",border:"1px solid #DDD",borderRadius:4,cursor:"pointer",minWidth:26,...st}}>{label}</button>;
+  const ticks=[]; for(let mm=0;mm<=REGLA_MM;mm+=10)ticks.push(mm);
+  return <div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:6}}>
+      <select style={{...iS,width:140,padding:"3px 6px",fontSize:12}} defaultValue="Times New Roman" onChange={e=>cmd("fontName",e.target.value)}>{FONTS.map(f=><option key={f} value={f}>{f}</option>)}</select>
+      <select style={{...iS,width:72,padding:"3px 6px",fontSize:12}} defaultValue="11" onChange={e=>tam(e.target.value)}>{["8","9","10","11","12","13","14","16","18","20","24"].map(s=><option key={s} value={s}>{s}pt</option>)}</select>
+      {boton("N",()=>cmd("bold"),{fontWeight:700})}
+      {boton("I",()=>cmd("italic"),{fontStyle:"italic"})}
+      {boton("S",()=>cmd("underline"),{textDecoration:"underline"})}
+      {boton("≡L",()=>cmd("justifyLeft"))}
+      {boton("≡C",()=>cmd("justifyCenter"))}
+      {boton("≡D",()=>cmd("justifyRight"))}
+      {boton("≡J",()=>cmd("justifyFull"))}
+      <input type="color" defaultValue="#000000" onChange={e=>cmd("foreColor",e.target.value)} style={{width:30,height:26,border:"1px solid #DDD",borderRadius:4,padding:1}}/>
+      {boton("↵ Espacio",()=>cmd("insertHTML","<div><br></div>"))}
+    </div>
+    <div ref={regla} style={{position:"relative",height:30,background:"#F0ECDD",border:"1px solid #DCD6C2",borderRadius:4,marginBottom:6,userSelect:"none"}}>
+      {ticks.map(mm=><div key={mm} style={{position:"absolute",left:`${mm/REGLA_MM*100}%`,top:0,width:1,height:12,background:"#6B6560"}}><span style={{position:"absolute",left:2,top:10,fontSize:9,color:"#6B6560"}}>{mm}</span></div>)}
+      <div title="Sangría de la primera línea (arrastrar)" onPointerDown={e=>arrastrar("pri",e)} style={{position:"absolute",left:`calc(${sg.pri/REGLA_MM*100}% - 6px)`,top:0,width:12,height:11,background:"var(--color-primary)",clipPath:"polygon(0 0,100% 0,50% 100%)",cursor:"ew-resize"}}/>
+      <div title="Sangría izquierda (arrastrar)" onPointerDown={e=>arrastrar("izq",e)} style={{position:"absolute",left:`calc(${sg.izq/REGLA_MM*100}% - 6px)`,bottom:0,width:12,height:11,background:"#21708c",clipPath:"polygon(50% 0,100% 100%,0 100%)",cursor:"ew-resize"}}/>
+    </div>
+    <div ref={ref} contentEditable suppressContentEditableWarning onInput={emitir} onKeyUp={leerSangria} onMouseUp={leerSangria}
+      onKeyDown={e=>{ if(e.key==="Tab"){ e.preventDefault(); cmd("insertHTML",'<span style="display:inline-block;width:12.7mm"></span>'); } }}
+      style={{minHeight:200,border:"1.5px solid #DCD6C2",borderRadius:7,padding:"10px 12px",background:"#FCFBF6",fontFamily:"'Times New Roman',serif",fontSize:12,lineHeight:1.5,outline:"none"}}/>
+    <div style={{fontSize:11,color:"#9A9482",marginTop:4}}>Tab: agrega una sangría. Regla: arrastrá ▼ para la primera línea y ▲ para la sangría izquierda del párrafo donde está el cursor.</div>
+  </div>;
+}
+
+// Encabezado de las notas de cada línea: frase del año y logo (si no se completan, se usan los de la pantalla Encabezado)
+function EncabezadoLinea({linea,defaultLeyenda,onSave}){
+  const[txt,setTxt]=useState(linea.membreteLeyenda||"");
+  const[ok,setOk]=useState(false);
+  function subirLogo(e){
+    const f=e.target.files&&e.target.files[0]; if(!f)return;
+    const r=new FileReader(); r.onload=()=>{onSave({membreteLogo:r.result});setOk(true);}; r.readAsDataURL(f);
+  }
+  return <div style={{marginTop:14,padding:"12px 14px",background:"#F7F4EC",border:"1px solid #E4DFCF",borderRadius:8}}>
+    <div style={{fontWeight:700,fontSize:13,color:"var(--color-titulo)",marginBottom:4}}>Encabezado de las notas de esta línea</div>
+    <div style={{fontSize:11.5,color:"#9A9482",marginBottom:8}}>Frase del año y logo que salen arriba de las notas. Si no se completan, se usan los de la pantalla Encabezado.</div>
+    <Campo label="Frase del encabezado"><input style={iS} value={txt} onChange={e=>{setTxt(e.target.value);setOk(false);}} placeholder={defaultLeyenda}/></Campo>
+    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+      <Boton size="sm" icon={Save} onClick={()=>{onSave({membreteLeyenda:txt.trim()});setOk(true);}}>Guardar frase</Boton>
+      <label style={{display:"inline-flex",alignItems:"center",cursor:"pointer"}}>
+        <span style={{border:"1.5px solid var(--color-primary)",color:"var(--color-primary)",borderRadius:7,padding:"5px 10px",fontWeight:600,fontSize:12.5}}>Cambiar logo</span>
+        <input type="file" accept="image/*" onChange={subirLogo} style={{display:"none"}}/>
+      </label>
+      {linea.membreteLogo&&<Boton size="sm" variant="outline" onClick={()=>{onSave({membreteLogo:""});setOk(true);}}>Quitar logo de esta línea</Boton>}
+      {ok&&<span style={{fontSize:12,color:"#2E7D46"}}>Guardado</span>}
+    </div>
+    {linea.membreteLogo&&<img src={linea.membreteLogo} alt="" style={{marginTop:8,height:44}}/>}
+  </div>;
+}
+
 function LineasManager({lineas,onSave}){
   const[expanded,setExpanded]=useState(null);
   const[editTasas,setEditTasas]=useState({});
@@ -2107,6 +3112,15 @@ function LineasManager({lineas,onSave}){
   const[editMemo,setEditMemo]=useState({});
   const[editMemoPago,setEditMemoPago]=useState({});
   const[editMemoGar,setEditMemoGar]=useState({});
+  const[editMemoInt,setEditMemoInt]=useState({});
+  const[editMemoCon,setEditMemoCon]=useState({});
+  const[editMemoLib,setEditMemoLib]=useState({});
+  const[editMemoCro,setEditMemoCro]=useState({});
+  const[editMemoReg,setEditMemoReg]=useState({});
+  const[editMemoRf,setEditMemoRf]=useState({});
+  const[editMemoDe,setEditMemoDe]=useState({});
+  const[editMemoOpp,setEditMemoOpp]=useState({});
+  const[editMemoCd,setEditMemoCd]=useState({});
   const[nueva,setNueva]=useState({nombre:"",tasaFinanciera:20,tasaFinancieraAsociado:15,tasaMora:15,tasaPunitorio:15,periodicidadInteres:"trimestral",numeroCuenta:"",cbu:"",destinosTexto:""});
 
   function updLinea(id,cambios){onSave(lineas.map(l=>l.id===id?{...l,...cambios}:l));}
@@ -2126,6 +3140,15 @@ function LineasManager({lineas,onSave}){
       destinos,plantillaMemo:MEMO_CONTABLE_DEFAULT,
       plantillaMemoTesoreriaPago:MEMO_TESORERIA_PAGO_DEFAULT,
       plantillaMemoTesoreriaGarantia:MEMO_TESORERIA_GARANTIA_DEFAULT,
+      plantillaIntimacion:MEMO_INTIMACION_DEFAULT,
+      plantillaContrato:MEMO_CONTRATO_DEFAULT,
+      plantillaLibreDeuda:MEMO_LIBRE_DEFAULT,
+      plantillaCronograma:MEMO_CRONOGRAMA_DEFAULT,
+      plantillaRegistro:MEMO_REGISTRO_DEFAULT,
+      plantillaRegionalFirma:MEMO_REGIONAL_FIRMA_DEFAULT,
+      plantillaDirectoEntrega:MEMO_DIRECTO_ENTREGA_DEFAULT,
+      plantillaMemoOpp:MEMO_OPP_DEFAULT,
+      plantillaCartaDocumento:MEMO_CARTA_DEFAULT,
     }]);
     setNueva({nombre:"",tasaFinanciera:20,tasaFinancieraAsociado:15,tasaMora:15,tasaPunitorio:15,periodicidadInteres:"trimestral",numeroCuenta:"",cbu:"",destinosTexto:""});
   }
@@ -2140,6 +3163,15 @@ function LineasManager({lineas,onSave}){
       const memo=editMemo[l.id]??l.plantillaMemo??MEMO_CONTABLE_DEFAULT;
       const memoPago=editMemoPago[l.id]??l.plantillaMemoTesoreriaPago??MEMO_TESORERIA_PAGO_DEFAULT;
       const memoGar=editMemoGar[l.id]??l.plantillaMemoTesoreriaGarantia??MEMO_TESORERIA_GARANTIA_DEFAULT;
+      const memoInt=editMemoInt[l.id]??l.plantillaIntimacion??MEMO_INTIMACION_DEFAULT;
+      const memoCon=editMemoCon[l.id]??l.plantillaContrato??MEMO_CONTRATO_DEFAULT;
+      const memoLib=editMemoLib[l.id]??l.plantillaLibreDeuda??MEMO_LIBRE_DEFAULT;
+      const memoCro=editMemoCro[l.id]??l.plantillaCronograma??MEMO_CRONOGRAMA_DEFAULT;
+      const memoReg=editMemoReg[l.id]??l.plantillaRegistro??MEMO_REGISTRO_DEFAULT;
+      const memoRf=editMemoRf[l.id]??l.plantillaRegionalFirma??MEMO_REGIONAL_FIRMA_DEFAULT;
+      const memoDe=editMemoDe[l.id]??l.plantillaDirectoEntrega??MEMO_DIRECTO_ENTREGA_DEFAULT;
+      const memoOpp=editMemoOpp[l.id]??l.plantillaMemoOpp??MEMO_OPP_DEFAULT;
+      const memoCd=editMemoCd[l.id]??l.plantillaCartaDocumento??MEMO_CARTA_DEFAULT;
       return <div key={l.id} style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,marginBottom:14}}>
         <div style={{padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setExpanded(e=>e===l.id?null:l.id)}>
           <div>
@@ -2195,15 +3227,25 @@ function LineasManager({lineas,onSave}){
             </table>
           </div>
 
+          <EncabezadoLinea key={"enc-"+l.id} linea={l} defaultLeyenda={DEFAULT_CONFIG.membreteLeyenda} onSave={cambios=>updLinea(l.id,cambios)}/>
           {/* Plantillas de notas */}
           {[
             {key:"memo",label:"Nota a Dirección Contable",val:memo,set:v=>setEditMemo({...editMemo,[l.id]:v}),save:()=>updLinea(l.id,{plantillaMemo:memo}),vars:"{nombre},{dni},{domicilio},{linea},{destino},{expediente},{contrato},{monto},{fecha_otorgamiento},{regional},{tabla_cuotas},{total_capital},{total_interes},{total_general},{fecha_actual}"},
             {key:"pago",label:"Nota a Tesorería – Pago a verificar",val:memoPago,set:v=>setEditMemoPago({...editMemoPago,[l.id]:v}),save:()=>updLinea(l.id,{plantillaMemoTesoreriaPago:memoPago}),vars:"{nombre},{dni},{domicilio},{linea},{destino},{expediente},{contrato},{regional},{tabla_cuotas},{total_abonado},{saldo_pendiente},{fecha_actual}"},
             {key:"gar",label:"Nota a Tesorería – Devolución de garantía",val:memoGar,set:v=>setEditMemoGar({...editMemoGar,[l.id]:v}),save:()=>updLinea(l.id,{plantillaMemoTesoreriaGarantia:memoGar}),vars:"{nombre},{dni},{domicilio},{linea},{destino},{expediente},{contrato},{fecha_contrato},{regional},{total_general},{fecha_otorgamiento},{fecha_actual}"},
+            {key:"int",label:"Nota de Intimación – Reclamo de deuda",val:memoInt,set:v=>setEditMemoInt({...editMemoInt,[l.id]:v}),save:()=>updLinea(l.id,{plantillaIntimacion:memoInt}),vars:"{fecha_actual},{localidad},{nombre},{expediente},{fecha_contrato},{linea}"},
+            {key:"con",label:"Contrato de Mutuo (hoja oficio)",val:memoCon,set:v=>setEditMemoCon({...editMemoCon,[l.id]:v}),save:()=>updLinea(l.id,{plantillaContrato:memoCon}),vars:"{nombre},{dni},{domicilio},{localidad},{expediente},{linea},{destino},{monto_pesos},{monto_letras},{plazo_texto},{cantidad_cuotas},{cuotas_detalle},{tasa_financiera},{tasa_mora},{tasa_punitorio},{cuenta_cobro},{cbu},{total_general},{total_letras},{fecha_actual}"},
+            {key:"lib",label:"Certificado de Libre Deuda",val:memoLib,set:v=>setEditMemoLib({...editMemoLib,[l.id]:v}),save:()=>updLinea(l.id,{plantillaLibreDeuda:memoLib}),vars:"{fecha_larga},{nombre},{localidad},{expediente},{numero_contrato},{linea},{fecha_otorgamiento},{monto_letras},{monto_pesos},{total_letras},{total_general}"},
+            {key:"cro",label:"Cronograma de cuotas",val:memoCro,set:v=>setEditMemoCro({...editMemoCro,[l.id]:v}),save:()=>updLinea(l.id,{plantillaCronograma:memoCro}),vars:"{fecha_larga},{nombre},{domicilio},{localidad},{fecha_contrato},{expediente},{fecha_transferencia},{fecha_rendicion_limite},{cuenta_cobro},{cbu}"},
+            {key:"reg",label:"Nota de Registro de Contrato",val:memoReg,set:v=>setEditMemoReg({...editMemoReg,[l.id]:v}),save:()=>updLinea(l.id,{plantillaRegistro:memoReg}),vars:"{fecha_larga},{productor_rol},{nombre},{productor_min},{el_la},{expediente},{anio_corto}"},
+            {key:"rf",label:"Nota Regional Firma",val:memoRf,set:v=>setEditMemoRf({...editMemoRf,[l.id]:v}),save:()=>updLinea(l.id,{plantillaRegionalFirma:memoRf}),vars:"{fecha_larga},{productor_rol},{nombre},{al_la},{tratamiento},{del_la},{beneficiario_min},{expediente},{anio_corto}"},
+            {key:"de",label:"Nota Directo Entregar Contrato",val:memoDe,set:v=>setEditMemoDe({...editMemoDe,[l.id]:v}),save:()=>updLinea(l.id,{plantillaDirectoEntrega:memoDe}),vars:"{fecha_larga},{productor_rol},{nombre},{productor_min},{al_la},{tratamiento},{domicilio},{telefono},{expediente},{anio_corto}"},
+            {key:"opp",label:"MEMO OPP",val:memoOpp,set:v=>setEditMemoOpp({...editMemoOpp,[l.id]:v}),save:()=>updLinea(l.id,{plantillaMemoOpp:memoOpp}),vars:"{fecha_larga},{productor_rol},{nombre},{expediente},{al_la},{tratamiento},{regional},{anio_corto}"},
+            {key:"cd",label:"Carta Documento",val:memoCd,set:v=>setEditMemoCd({...editMemoCd,[l.id]:v}),save:()=>updLinea(l.id,{plantillaCartaDocumento:memoCd}),vars:"{fecha_larga},{productor_ap_nombre},{domicilio},{localidad},{tratamiento},{nombre},{fecha_contrato},{numero_contrato},{linea},{cuenta_cobro},{fecha_corte},{monto_reclamo},{monto_reclamo_letras},{monto_reclamo_cent},{intimado},{emplazado},{notificado}"},
           ].map(p=><div key={p.key}>
             <div style={{fontWeight:700,fontSize:13,color:"#23362B",marginBottom:4,marginTop:20}}>{p.label}</div>
             <div style={{fontSize:11,color:"#9A9482",marginBottom:6}}>Variables disponibles: <code style={{fontSize:10}}>{p.vars}</code></div>
-            <textarea style={{...iS,height:180,resize:"vertical",fontFamily:"'JetBrains Mono',monospace",fontSize:11.5}} value={p.val} onChange={e=>p.set(e.target.value)}/>
+            <RichTemplateEditor key={l.id+"-"+p.key} valorInicial={plantillaAHtml(p.val)} onChange={p.set}/>
             <div style={{marginTop:8}}><Boton size="sm" icon={Save} onClick={p.save}>Guardar plantilla</Boton></div>
           </div>)}
         </div>}
@@ -2240,10 +3282,11 @@ function LineasManager({lineas,onSave}){
 // ─── Usuarios ─────────────────────────────────────────────────────────────────
 function UsuariosManager({usuarios,onSave}){
   const[form,setForm]=useState({usuario:"",clave:"",nombre:"",rol:"viewer",regional:REGIONALES_LISTA[0],dni:""});
-  function agregar(){
+  async function agregar(){
     if(!form.usuario||!form.clave||!form.nombre)return;
+    if(form.clave.length<10){alert("La clave debe tener al menos 10 caracteres.");return;}
     if(usuarios.some(u=>u.usuario===form.usuario)){alert("Ese usuario ya existe.");return;}
-    const nu={usuario:form.usuario,clave:form.clave,nombre:form.nombre,rol:form.rol};
+    const nu={usuario:form.usuario,nombre:form.nombre,rol:form.rol,mustChange:true,...(await crearCredencial(form.clave))};
     if(form.rol==="viewer_regional")nu.regional=form.regional;
     if(form.rol==="productor"){
       if(!form.dni.trim()){alert("El rol Productor requiere ingresar el DNI/CUIT vinculado al crédito.");return;}
@@ -2307,7 +3350,7 @@ function PerfilForm({user,onSave}){
   const[claveC,setClaveC]=useState("");
   const[msg,setMsg]=useState("");
   function handleFoto(e){const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=()=>{const img=new window.Image();img.onload=()=>{const s=160,c=document.createElement("canvas");c.width=s;c.height=s;const ctx=c.getContext("2d"),sc=Math.max(s/img.width,s/img.height),w=img.width*sc,h=img.height*sc;ctx.drawImage(img,(s-w)/2,(s-h)/2,w,h);setFoto(c.toDataURL("image/jpeg",.82));};img.src=r.result;};r.readAsDataURL(f);}
-  function guardar(){if(!nombre.trim()){setMsg("El nombre no puede estar vacío.");return;}if(clave&&clave!==claveC){setMsg("Las claves no coinciden.");return;}const ch={nombre:nombre.trim(),foto};if(clave)ch.clave=clave;onSave(ch);setClave("");setClaveC("");setMsg("Perfil actualizado.");}
+  async function guardar(){if(!nombre.trim()){setMsg("El nombre no puede estar vacío.");return;}if(clave&&clave!==claveC){setMsg("Las claves no coinciden.");return;}if(clave&&clave.length<10){setMsg("La clave debe tener al menos 10 caracteres.");return;}const ch={nombre:nombre.trim(),foto};if(clave)Object.assign(ch,await crearCredencial(clave));onSave(ch);setClave("");setClaveC("");setMsg("Perfil actualizado.");}
   return <div style={{maxWidth:420}}>
     <SectionTitle icon={UserCircle} title="Mi perfil"/>
     <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,padding:20}}>
@@ -3970,9 +5013,144 @@ function PagosListado({creditos,lineas,colorBarras,onClose,onPrint,onSelectCredi
   </div>;
 }
 
+// ─── Estado de cuenta: listado de productores ────────────────────────────────
+// Columnas: fecha de transferencia · OPP · fuente de financiamiento · productor ·
+// línea de crédito · monto otorgado · monto adeudado (saldo pendiente + mora + punitorios).
+function EstadoCuentaListado({creditos,lineas,onClose,onPrint}){
+  const[busqueda,setBusqueda]=useState("");
+  const[filtroRegional,setFiltroRegional]=useState("TODAS");
+  const[filtroLinea,setFiltroLinea]=useState("TODAS");
+  const[filtroFuente,setFiltroFuente]=useState("TODAS");
+  const[filtroEstado,setFiltroEstado]=useState("TODOS");
+  const fechaTransf=c=>c.fechaOtorgamiento||"";
+  const regionales=useMemo(()=>Array.from(new Set(creditos.map(getRegional))).sort(),[creditos]);
+  const fuentes=useMemo(()=>Array.from(new Set(creditos.map(c=>c.fuenteFinanciamiento).filter(Boolean))).sort(),[creditos]);
+  const filas=useMemo(()=>creditos.map(c=>{
+    const lin=lineas.find(l=>l.id===c.lineaId);
+    const t=calcularTotalesCredito(c,lin);
+    return{c,regional:getRegional(c),fecha:fechaTransf(c),opp:c.opp||"",fuente:c.fuenteFinanciamiento||"",
+      productor:c.productor?.nombre||"",lineaNombre:lin?.nombre||"",otorgado:c.monto||0,adeudado:t.totalAdeudado,estado:estadoFinal(c)};
+  }),[creditos,lineas]);
+  const filtradas=useMemo(()=>filas.filter(f=>{
+    if(filtroRegional!=="TODAS"&&f.regional!==filtroRegional)return false;
+    if(filtroLinea!=="TODAS"&&f.c.lineaId!==filtroLinea)return false;
+    if(filtroFuente!=="TODAS"&&f.fuente!==filtroFuente)return false;
+    if(filtroEstado!=="TODOS"&&f.estado!==filtroEstado)return false;
+    if(busqueda.trim()){const q=busqueda.toLowerCase();return(f.productor+" "+(f.c.productor?.dni||"")+" "+(f.c.expediente||"")).toLowerCase().includes(q);}
+    return true;
+  }),[filas,filtroRegional,filtroLinea,filtroFuente,filtroEstado,busqueda]);
+  const tot=useMemo(()=>filtradas.reduce((a,f)=>({otorgado:a.otorgado+f.otorgado,adeudado:a.adeudado+f.adeudado}),{otorgado:0,adeudado:0}),[filtradas]);
+  // Exportación a Excel: tabla con los importes como números (se pueden sumar y filtrar)
+  function exportarExcel(){
+    const esc2=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const num=v=>`<td x:num="${Number(v||0).toFixed(2)}" style="mso-number-format:'#,##0.00';">${Number(v||0).toFixed(2)}</td>`;
+    const filasXls=filtradas.map(f=>`<tr><td>${fmtDate(f.fecha)}</td><td>${esc2(f.opp)||"-"}</td><td>${esc2(f.fuente)||"-"}</td><td>${esc2(f.productor)}</td><td>${esc2(f.lineaNombre)}</td>${num(f.otorgado)}${num(f.adeudado)}</tr>`).join("");
+    const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Estado de cuenta</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>
+      <table border="1"><thead><tr style="font-weight:bold;background:#F0ECDD;"><th>Fecha de otorgamiento</th><th>OPP</th><th>Fuente de financiamiento</th><th>Productor</th><th>Línea de crédito</th><th>Monto otorgado</th><th>Monto adeudado</th></tr></thead>
+      <tbody>${filasXls}<tr style="font-weight:bold;"><td colspan="5">TOTALES</td>${num(tot.otorgado)}${num(tot.adeudado)}</tr></tbody></table></body></html>`;
+    const blob=new Blob(["\ufeff",html],{type:"application/vnd.ms-excel"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download="Estado de cuenta - Listado de productores.xls";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  }
+  function imprimir(){
+    const esc2=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const filasHtml=filtradas.map(f=>`<tr><td>${fmtDate(f.fecha)}</td><td>${esc2(f.opp)||"-"}</td><td>${esc2(f.fuente)||"-"}</td><td>${esc2(f.productor)}</td><td>${esc2(f.lineaNombre)}</td><td style="text-align:right">${money(f.otorgado)}</td><td style="text-align:right">${money(f.adeudado)}</td></tr>`).join("");
+    const html=`<div style="text-align:center;margin-bottom:14px"><div style="font-weight:800;font-size:14pt">Estado de cuenta — Listado de productores</div><div style="font-size:10pt;color:#666">Generado el ${fmtDate(todayStr())} · ${filtradas.length} crédito(s)</div></div>
+      <table><thead><tr><th>Fecha de otorgamiento</th><th>OPP</th><th>Fuente de financiamiento</th><th>Productor</th><th>Línea de crédito</th><th>Monto otorgado</th><th>Monto adeudado</th></tr></thead>
+      <tbody>${filasHtml}<tr style="background:#f0f0f0;font-weight:700"><td colspan="5">TOTALES</td><td style="text-align:right">${money(tot.otorgado)}</td><td style="text-align:right">${money(tot.adeudado)}</td></tr></tbody></table>`;
+    onPrint(html);
+  }
+  const sel={...iS,padding:"6px 8px",fontSize:12.5};
+  return <div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:16}}>
+    <div style={{background:"#fff",borderRadius:12,width:"96%",maxWidth:1180,maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+      <BandaTricolor marginBottom={0}/>
+      <div style={{padding:"12px 18px",borderBottom:"1px solid #EEE9D9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:700,color:"var(--color-titulo)",fontSize:15}}>Estado de cuenta — Listado de productores</div>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <Boton size="sm" icon={Printer} onClick={imprimir}>Imprimir / PDF</Boton>
+          <Boton size="sm" variant="outline" icon={FileSignature} onClick={exportarExcel}>Excel</Boton>
+          <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+        </div>
+      </div>
+      <div style={{padding:"12px 18px",borderBottom:"1px solid #EEE9D9",display:"flex",gap:8,flexWrap:"wrap"}}>
+        <div style={{position:"relative",flex:"1 1 220px"}}><Search size={13} style={{position:"absolute",left:9,top:11,color:"#9A9482"}}/><input style={{...sel,paddingLeft:28}} placeholder="Buscar productor, DNI o expediente…" value={busqueda} onChange={e=>setBusqueda(e.target.value)}/></div>
+        <select style={{...sel,width:160}} value={filtroEstado} onChange={e=>setFiltroEstado(e.target.value)}><option value="TODOS">Todos los estados</option><option value="AL_DIA">Al día</option><option value="MORA">En mora</option><option value="CANCELADO">Cancelado</option><option value="CONDONADO">Condonado</option><option value="EN_TRAMITE">En trámite</option></select>
+        <select style={{...sel,width:170}} value={filtroRegional} onChange={e=>setFiltroRegional(e.target.value)}><option value="TODAS">Todas las regionales</option>{regionales.map(r=><option key={r} value={r}>{r}</option>)}</select>
+        <select style={{...sel,width:170}} value={filtroLinea} onChange={e=>setFiltroLinea(e.target.value)}><option value="TODAS">Todas las líneas</option>{lineas.map(l=><option key={l.id} value={l.id}>{l.nombre}</option>)}</select>
+        <select style={{...sel,width:190}} value={filtroFuente} onChange={e=>setFiltroFuente(e.target.value)}><option value="TODAS">Todas las fuentes</option>{fuentes.map(f=><option key={f} value={f}>{f}</option>)}</select>
+      </div>
+      <div style={{padding:"8px 18px",display:"flex",gap:24,background:"#F7F4EC",borderBottom:"1px solid #EEE9D9",flexWrap:"wrap",fontSize:12}}>
+        <span>Créditos: <b>{filtradas.length}</b></span>
+        <span>Monto otorgado: <b style={{fontFamily:"monospace"}}>{money(tot.otorgado)}</b></span>
+        <span>Monto adeudado: <b style={{fontFamily:"monospace",color:tot.adeudado>0?"var(--color-danger)":"inherit"}}>{money(tot.adeudado)}</b></span>
+      </div>
+      <div style={{flex:1,overflow:"auto",padding:"0 18px 16px"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,marginTop:12}}>
+          <thead><tr style={{background:"#F0ECDD"}}>
+            <th style={TH}>Fecha de otorgamiento</th><th style={TH}>OPP</th><th style={TH}>Fuente de financiamiento</th>
+            <th style={TH}>Productor</th><th style={TH}>Línea de crédito</th><th style={{...TH,textAlign:"right"}}>Monto otorgado</th><th style={{...TH,textAlign:"right"}}>Monto adeudado</th>
+          </tr></thead>
+          <tbody>
+            {filtradas.map((f,i)=><tr key={f.c.id||i} style={{borderTop:"1px solid #EEE9D9"}}>
+              <td style={{...TD,whiteSpace:"nowrap"}}>{fmtDate(f.fecha)}</td>
+              <td style={{...TD,fontFamily:"monospace"}}>{f.opp||"-"}</td>
+              <td style={TD}>{f.fuente||"-"}</td>
+              <td style={TD}>{f.productor}</td>
+              <td style={TD}>{f.lineaNombre}</td>
+              <td style={{...TD,fontFamily:"monospace",textAlign:"right"}}>{money(f.otorgado)}</td>
+              <td style={{...TD,fontFamily:"monospace",textAlign:"right",fontWeight:700,color:f.adeudado>0?"var(--color-danger)":"inherit"}}>{money(f.adeudado)}</td>
+            </tr>)}
+            {filtradas.length===0&&<tr><td colSpan={7} style={{...TD,textAlign:"center",color:"#9A9482",padding:24}}>No hay créditos que coincidan con los filtros.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>;
+}
+
+// ─── Autoridades: nombres de las autoridades del Ministerio (solo el administrador las modifica) ───
+const AUTORIDADES_CARGOS=[{id:"ministro",label:"Ministro"},{id:"subsecretario",label:"Subsecretario"},{id:"directorNorte",label:"Director Norte"},{id:"directorMeseta",label:"Director/a Meseta Central"},{id:"directorSur",label:"Director/a Sur"},{id:"directorOeste",label:"Director/a Oeste"},{id:"directorAdministrativo",label:"Director/a Administrativo Contable"}];
+function AutoridadesModal({config,puedeEditar,onGuardar,onClose}){
+  const[draft,setDraft]=useState({...DEFAULT_CONFIG.autoridades,...(config.autoridades||{})});
+  const[ok,setOk]=useState(false);
+  function guardar(){ onGuardar({...config,autoridades:draft}); setOk(true); }
+  return <div style={{position:"fixed",inset:0,background:"rgba(30,25,10,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:150,padding:16}}>
+    <div style={{background:"#fff",borderRadius:12,width:520,maxWidth:"100%",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+      <BandaTricolor marginBottom={0}/>
+      <div style={{padding:"12px 18px",borderBottom:"1px solid #EEE9D9",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:700,color:"var(--color-titulo)",fontSize:15}}>Autoridades</div>
+        <button onClick={onClose} style={{background:"transparent",border:"none",cursor:"pointer",color:"#8A8470"}}><X size={20}/></button>
+      </div>
+      <div style={{padding:"16px 18px",display:"flex",flexDirection:"column",gap:12}}>
+        {AUTORIDADES_CARGOS.map(a=><div key={a.id} style={{display:"grid",gridTemplateColumns:"150px 1fr",gap:10,alignItems:"center"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#23362B"}}>{a.label}:</div>
+          {puedeEditar
+            ?<input style={iS} value={draft[a.id]||""} placeholder="Nombre y apellido" onChange={e=>{setDraft({...draft,[a.id]:e.target.value});setOk(false);}}/>
+            :<div style={{fontSize:13.5,color:"#000"}}>{draft[a.id]||<span style={{color:"#9A9482"}}>(sin cargar)</span>}</div>}
+        </div>)}
+      </div>
+      {puedeEditar&&<div style={{padding:"12px 18px",borderTop:"1px solid #EEE9D9",display:"flex",gap:10,alignItems:"center",justifyContent:"flex-end"}}>
+        {ok&&<span style={{fontSize:12,color:"#2E7D46"}}>Guardado</span>}
+        <Boton size="sm" icon={Save} onClick={guardar}>Guardar autoridades</Boton>
+      </div>}
+    </div>
+  </div>;
+}
+
 function CrecerApp(){
   const[loading,setLoading]=useState(true);
   const[usuarios,setUsuarios]=useState(DEFAULT_USUARIOS);
+  const[needsSetup,setNeedsSetup]=useState(false);
+  const[avisoSesion,setAvisoSesion]=useState("");
+  const[log,setLog]=useState([]);
+  const[showActividad,setShowActividad]=useState(false);
+  const[showRespaldo,setShowRespaldo]=useState(false);
+  const[copias,setCopias]=useState([]);
+  const[claveAuto,setClaveAuto]=useState("");
+  const[omitirClaveAuto,setOmitirClaveAuto]=useState(false);
   const[lineas,setLineas]=useState(DEFAULT_LINEAS);
   const[tema,setTema]=useState(DEFAULT_TEMA);
   const[config,setConfig]=useState(DEFAULT_CONFIG);
@@ -3982,6 +5160,7 @@ function CrecerApp(){
   const[selected,setSelected]=useState(null);
   const[showSimulador,setShowSimulador]=useState(false);
   const[showEstadoCuenta,setShowEstadoCuenta]=useState(false);
+  const[showAutoridades,setShowAutoridades]=useState(false);
   const[showPadron,setShowPadron]=useState(false);
   const[showPagos,setShowPagos]=useState(false);
   const[busqueda,setBusqueda]=useState("");
@@ -3994,6 +5173,7 @@ function CrecerApp(){
   const[filtroProximoVencimiento,setFiltroProximoVencimiento]=useState(false);
   const[filtroSituacion,setFiltroSituacion]=useState("TODAS");
   const[filtroCiudad,setFiltroCiudad]=useState("TODAS");
+  const[filtroCancAnio,setFiltroCancAnio]=useState("TODOS");
   // Estado global de impresión: contenido HTML que se inyecta en #print-area y se imprime
   const[printHTML,setPrintHTML]=useState("");
 
@@ -4020,7 +5200,13 @@ function CrecerApp(){
     const l=await loadJSON("crecer-lineas",DEFAULT_LINEAS);
     let c=await loadJSON("crecer-creditos",null);
     if(!c){c=seedCreditos(l);await saveJSON("crecer-creditos",c);}
-    setUsuarios(Array.isArray(u)&&u.length?u:DEFAULT_USUARIOS);
+    // Usuarios de fábrica fuera; claves en texto plano pasan a hash y se piden de nuevo al ingresar
+    const uu=(Array.isArray(u)?u:[]).filter(x=>!(["admin","consulta"].includes(x.usuario)&&x.clave===x.usuario));
+    const mig=[];
+    for(const x of uu){ if(x.clave!==undefined&&!x.hash){ const {clave,...r}=x; mig.push({...r,...(await crearCredencial(String(clave))),mustChange:true}); } else mig.push(x); }
+    setUsuarios(mig); setNeedsSetup(mig.length===0); await saveJSON("crecer-usuarios",mig);
+    setLog(await loadJSON("crecer-log",[])||[]);
+    setCopias(await loadJSON("crecer-copias",[])||[]);
     setTema({...DEFAULT_TEMA,...tm});
     // Si había un logo vacío guardado de una sesión anterior, no debe tapar
     // el logo institucional oficial que ahora viene por defecto.
@@ -4028,6 +5214,35 @@ function CrecerApp(){
     setLineas(l);setCreditos(c);setLoading(false);
   })();},[]);
 
+  const userRef=React.useRef(null);
+  React.useEffect(()=>{userRef.current=user;},[user]);
+  const registrarLog=useCallback((accion,detalle,quien)=>{
+    const reg={fecha:new Date().toISOString(),usuario:quien||userRef.current?.usuario||"sistema",accion,detalle:detalle||""};
+    setLog(prev=>{const next=[reg,...prev].slice(0,2000);saveJSON("crecer-log",next);return next;});
+  },[]);
+  const ultimaAct=React.useRef(Date.now());
+  React.useEffect(()=>{
+    const f=()=>{ultimaAct.current=Date.now();};
+    const ev=["mousemove","keydown","click","touchstart"];
+    ev.forEach(e=>window.addEventListener(e,f));
+    const t=setInterval(()=>{ if(userRef.current&&Date.now()-ultimaAct.current>15*60*1000){ userRef.current=null; setUser(null); setAvisoSesion("La sesión se cerró por inactividad."); } },15000);
+    return()=>{ev.forEach(e=>window.removeEventListener(e,f));clearInterval(t);};
+  },[]);
+  // Copia automática: cada 2 horas guarda una copia cifrada en el sistema (solo si hay clave en memoria)
+  React.useEffect(()=>{
+    if(!user||user.rol!=="admin"||!(config.copiaAuto&&config.copiaAuto.activa)||!claveAuto)return;
+    const chequear=async()=>{
+      const ult=await loadJSON("crecer-copia-ultima",null);
+      if(ult&&Date.now()-new Date(ult).getTime()<2*3600*1000)return;
+      const enc=await cifrarRespaldo(JSON.stringify({v:1,fecha:new Date().toISOString(),usuarios,creditos,lineas,config,tema,log}),claveAuto);
+      const prev=(await loadJSON("crecer-copias",[]))||[];
+      const next=[{fecha:new Date().toISOString(),data:enc},...prev].slice(0,12);
+      await saveJSON("crecer-copias",next); await saveJSON("crecer-copia-ultima",new Date().toISOString()); setCopias(next);
+    };
+    chequear();
+    const t=setInterval(chequear,60000);
+    return()=>clearInterval(t);
+  },[user,config,claveAuto,usuarios,creditos,lineas,tema,log]);
   const updateCredito=useCallback((act)=>{
     setCreditos(prev=>{
       const next=prev.map(c=>c.id===act.id?act:c);
@@ -4035,6 +5250,7 @@ function CrecerApp(){
       return next;
     });
     setSelected(act);
+    registrarLog("Modificó crédito",act.expediente||act.id);
   },[]);
   // Agrega ubicaciones a varios créditos de una vez (vinculación con el padrón RENSPA).
   const agregarUbicaciones=useCallback((cambios)=>{
@@ -4047,23 +5263,42 @@ function CrecerApp(){
   },[]);
   const deleteCredito=useCallback((id)=>{
     setCreditos(prev=>{
+      const borrado=prev.find(c=>c.id===id);
+      registrarLog("Eliminó crédito",borrado?.expediente||id);
       const next=prev.filter(c=>c.id!==id);
       saveJSON("crecer-creditos",next);
       return next;
     });
     setSelected(null);
   },[]);
-  function createCredito(n){setCreditos(prev=>{const next=[n,...prev];saveJSON("crecer-creditos",next);return next;});setView("inicio");}
+  function createCredito(n){setCreditos(prev=>{const next=[n,...prev];saveJSON("crecer-creditos",next);return next;});registrarLog("Creó crédito",(n.expediente||"s/n")+" · "+(n.productor?.nombre||""));setView("inicio");}
   function saveLineas(n){setLineas(n);saveJSON("crecer-lineas",n);}
   function saveTema(n){setTema(n);saveJSON("crecer-tema",n);}
   function saveCfg(n){setConfig(n);saveJSON("crecer-config",n);}
   function saveUsuarios(n){setUsuarios(n);saveJSON("crecer-usuarios",n);}
   function actualizarPerfil(ch){const next=usuarios.map(u=>u.usuario===user.usuario?{...u,...ch}:u);setUsuarios(next);saveJSON("crecer-usuarios",next);setUser(u=>({...u,...ch}));}
+  function toggleAuto(v){ saveCfg({...config,copiaAuto:{activa:v}}); if(v)setOmitirClaveAuto(false); }
+  function descargarCopia(item){
+    const blob=new Blob([JSON.stringify(item.data)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download="copia-automatica-"+item.fecha.slice(0,16).replace(/[:T]/g,"-")+".crecer";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  }
+  function aplicarRespaldo(d){
+    setUsuarios(d.usuarios||[]); saveJSON("crecer-usuarios",d.usuarios||[]);
+    setCreditos(d.creditos||[]); saveJSON("crecer-creditos",d.creditos||[]);
+    setLineas(d.lineas||[]); saveJSON("crecer-lineas",d.lineas||[]);
+    if(d.config){setConfig({...DEFAULT_CONFIG,...d.config}); saveJSON("crecer-config",d.config);}
+    if(d.tema){setTema({...DEFAULT_TEMA,...d.tema}); saveJSON("crecer-tema",d.tema);}
+    setLog(d.log||[]); saveJSON("crecer-log",d.log||[]);
+    setNeedsSetup((d.usuarios||[]).length===0); setUser(null);
+  }
   async function resetearTodo(){
     const li=DEFAULT_LINEAS,cr=seedCreditos(li);
     await saveJSON("crecer-usuarios",DEFAULT_USUARIOS);await saveJSON("crecer-tema",DEFAULT_TEMA);
     await saveJSON("crecer-config",DEFAULT_CONFIG);await saveJSON("crecer-lineas",li);await saveJSON("crecer-creditos",cr);
-    setUsuarios(DEFAULT_USUARIOS);setTema(DEFAULT_TEMA);setConfig(DEFAULT_CONFIG);setLineas(li);setCreditos(cr);setUser(null);
+    setUsuarios(DEFAULT_USUARIOS);setNeedsSetup(true);setTema(DEFAULT_TEMA);setConfig(DEFAULT_CONFIG);setLineas(li);setCreditos(cr);setUser(null);
   }
 
   const creditosVisibles=useMemo(()=>{
@@ -4082,6 +5317,10 @@ function CrecerApp(){
     const s=new Set(creditosVisibles.map(c=>c.fechaOtorgamiento?.slice(0,4)).filter(Boolean));
     return Array.from(s).sort().reverse();
   },[creditosVisibles]);
+  const aniosCancelacion=useMemo(()=>{
+    const s=new Set(creditosVisibles.map(c=>cancelacionISO(c).slice(0,4)).filter(Boolean));
+    return Array.from(s).sort().reverse();
+  },[creditosVisibles]);
 
   const fuentesDisponibles=useMemo(()=>{
     const s=new Set(creditosVisibles.map(c=>c.fuenteFinanciamiento).filter(Boolean));
@@ -4095,7 +5334,7 @@ function CrecerApp(){
   const haySinCiudad=useMemo(()=>creditosVisibles.some(c=>!ciudadDe(c)),[creditosVisibles]);
 
   const filtradosBase=useMemo(()=>creditosVisibles.filter(c=>{
-    const est=calcularEstado(c);
+    const est=estadoFinal(c);
     if(filtroEstado!=="TODOS"&&est!==filtroEstado)return false;
     if(filtroRegional!=="TODAS"&&getRegional(c)!==filtroRegional)return false;
     if(filtroLinea!=="TODAS"&&c.lineaId!==filtroLinea)return false;
@@ -4104,9 +5343,10 @@ function CrecerApp(){
     if(filtroFuente!=="TODAS"&&(c.fuenteFinanciamiento||"")!==filtroFuente)return false;
     if(filtroSituacion!=="TODAS"&&(filtroSituacion==="SIN"?!!c.situacion:c.situacion!==filtroSituacion))return false;
     if(filtroCiudad!=="TODAS"&&(filtroCiudad==="SIN"?!!ciudadDe(c):ciudadDe(c)!==filtroCiudad))return false;
+    if(filtroCancAnio!=="TODOS"){const f=cancelacionISO(c);if(!f||f.slice(0,4)!==filtroCancAnio)return false;}
     if(busqueda.trim()){const q=busqueda.toLowerCase();return c.productor.nombre.toLowerCase().includes(q)||c.expediente.toLowerCase().includes(q)||c.productor.dni.toLowerCase().includes(q);}
     return true;
-  }),[creditosVisibles,busqueda,filtroEstado,filtroRegional,filtroLinea,filtroDestino,filtroAnio,filtroFuente,filtroSituacion,filtroCiudad,lineas]);
+  }),[creditosVisibles,busqueda,filtroEstado,filtroRegional,filtroLinea,filtroDestino,filtroAnio,filtroFuente,filtroSituacion,filtroCiudad,filtroCancAnio,lineas]);
 
   // Créditos (no cuotas) que tienen al menos una cuota pendiente venciendo dentro de los próximos 10 días
   const DIAS_PROXIMO_VENCIMIENTO=10;
@@ -4159,7 +5399,9 @@ function CrecerApp(){
   }),[tema]);
 
   if(loading)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#8A8470",fontFamily:"'Public Sans',system-ui"}}>Cargando sistema…</div>;
-  if(!user)return <div style={{...tv}}><style>{"*{box-sizing:border-box;}"}</style><LoginScreen usuarios={usuarios} onLogin={setUser} config={{...DEFAULT_CONFIG,...config}} onReset={resetearTodo}/></div>;
+  if(user&&user.mustChange)return <div style={{...tv}}><style>{"*{box-sizing:border-box;}"}</style><CambiarClaveForzado user={user} onListo={async(cred)=>{const next=usuarios.map(x=>x.usuario===user.usuario?{...x,...cred,mustChange:false}:x);saveUsuarios(next);setUser(u=>({...u,...cred,mustChange:false}));registrarLog("Cambió su clave","",user.usuario);}}/></div>;
+  if(!user&&needsSetup)return <div style={{...tv}}><style>{"*{box-sizing:border-box;}"}</style><SetupScreen config={{...DEFAULT_CONFIG,...config}} onCrear={async(u)=>{saveUsuarios([u]);setNeedsSetup(false);setUser(u);registrarLog("Creó la cuenta de administrador","",u.usuario);}}/></div>;
+  if(!user)return <div style={{...tv}}><style>{"*{box-sizing:border-box;}"}</style><LoginScreen usuarios={usuarios} aviso={avisoSesion} onLogin={(u)=>{setAvisoSesion("");setUser(u);registrarLog("Ingresó al sistema","",u.usuario);}} config={{...DEFAULT_CONFIG,...config}} onReset={resetearTodo}/></div>;
 
   const isAdmin=user.rol==="admin";
 
@@ -4210,9 +5452,9 @@ function CrecerApp(){
         {[
           {id:"inicio",icon:FileText,label:"Inicio"},
           {id:"simulador",icon:CreditCard,label:"Simulador de cuotas"},
-          ...(isAdmin?[{id:"nuevo",icon:Plus,label:"Nuevo crédito"},{id:"lineas",icon:Landmark,label:"Líneas de crédito"},{id:"usuarios",icon:Users,label:"Usuarios"},{id:"apariencia",icon:Settings,label:"Apariencia"},{id:"encabezado",icon:Stamp,label:"Encabezado"}]:[]),
+          ...(isAdmin?[{id:"nuevo",icon:Plus,label:"Nuevo crédito"},{id:"lineas",icon:Landmark,label:"Líneas de crédito"},{id:"autoridades",icon:Users,label:"Autoridades"},{id:"usuarios",icon:Users,label:"Usuarios"},{id:"apariencia",icon:Settings,label:"Apariencia"},{id:"encabezado",icon:Stamp,label:"Encabezado"},{id:"actividad",icon:Clock,label:"Registro de actividad"},{id:"respaldo",icon:Save,label:"Copia de seguridad"}]:[...(user.rol==="viewer"?[{id:"nuevo",icon:Plus,label:"Nuevo crédito"}]:[]),...(user.rol!=="productor"?[{id:"autoridades",icon:Users,label:"Autoridades"}]:[])]),
           {id:"perfil",icon:UserCircle,label:"Mi perfil"},
-        ].map(({id,icon,label})=><NavItem key={id} icon={icon} label={label} active={id==="simulador"?showSimulador:view===id} onClick={()=>id==="simulador"?setShowSimulador(true):setView(id)}/>)}
+        ].map(({id,icon,label})=><NavItem key={id} icon={icon} label={label} active={id==="simulador"?showSimulador:id==="autoridades"?showAutoridades:id==="actividad"?showActividad:id==="respaldo"?showRespaldo:view===id} onClick={()=>id==="simulador"?setShowSimulador(true):id==="autoridades"?setShowAutoridades(true):id==="actividad"?setShowActividad(true):id==="respaldo"?setShowRespaldo(true):setView(id)}/>)}
       </div>
 
       <div style={{flex:1,padding:"20px 26px 60px",minWidth:0}}>
@@ -4268,20 +5510,21 @@ function CrecerApp(){
           {/* Filtros */}
           <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
             <div style={{position:"relative",flex:"1 1 200px"}}><Search size={13} style={{position:"absolute",left:9,top:11,color:"#9A9482"}}/><input style={{...iS,paddingLeft:28}} placeholder="Buscar productor, DNI o expediente…" value={busqueda} onChange={e=>setBusqueda(e.target.value)}/></div>
-            <select style={{...iS,width:148}} value={filtroEstado} onChange={e=>setFiltroEstado(e.target.value)}><option value="TODOS">Todos los estados</option><option value="AL_DIA">Al día</option><option value="MORA">En mora</option><option value="CANCELADO">Cancelado</option></select>
+            <select style={{...iS,width:148}} value={filtroEstado} onChange={e=>setFiltroEstado(e.target.value)}><option value="TODOS">Todos los estados</option><option value="AL_DIA">Al día</option><option value="MORA">En mora</option><option value="CANCELADO">Cancelado</option><option value="CONDONADO">Condonado</option><option value="EN_TRAMITE">En trámite</option></select>
             {user.rol!=="productor"&&user.rol!=="viewer_regional"&&<select style={{...iS,width:178}} value={filtroRegional} onChange={e=>setFiltroRegional(e.target.value)}><option value="TODAS">Todas las regionales</option>{REGIONALES_LISTA.map(r=><option key={r} value={r}>{REGIONALES_NOMBRE[r]}</option>)}<option value="Sin asignar">Sin asignar</option></select>}
             <select style={{...iS,width:160}} value={filtroLinea} onChange={e=>{setFiltroLinea(e.target.value);setFiltroDestino("TODOS");}}><option value="TODAS">Todas las líneas</option>{lineas.map(l=><option key={l.id} value={l.id}>{l.nombre}</option>)}</select>
             <select style={{...iS,width:160}} value={filtroDestino} onChange={e=>setFiltroDestino(e.target.value)}><option value="TODOS">Todos los destinos</option>{destDisponibles.map(d=><option key={d} value={d}>{d}</option>)}</select>
-            <select style={{...iS,width:100}} value={filtroAnio} onChange={e=>setFiltroAnio(e.target.value)}><option value="TODOS">Todos los años</option>{aniosDisponibles.map(a=><option key={a} value={a}>{a}</option>)}</select>
+            <select style={{...iS,width:100}} value={filtroAnio} onChange={e=>setFiltroAnio(e.target.value)}><option value="TODOS">Fecha otorgado</option>{aniosDisponibles.map(a=><option key={a} value={a}>{a}</option>)}</select>
             {user.rol!=="productor"&&user.rol!=="viewer_regional"&&<select style={{...iS,width:190}} value={filtroFuente} onChange={e=>setFiltroFuente(e.target.value)}><option value="TODAS">Todas las fuentes</option>{fuentesDisponibles.map(f=><option key={f} value={f}>{f}</option>)}</select>}
             <select style={{...iS,width:186}} value={filtroSituacion} onChange={e=>setFiltroSituacion(e.target.value)}><option value="TODAS">Todas las situaciones</option>{SITUACIONES.map(s=><option key={s.id} value={s.id}>{s.punto} {s.label}</option>)}<option value="SIN">⚪ Sin definir</option></select>
             {user.rol!=="productor"&&<select style={{...iS,width:170}} value={filtroCiudad} onChange={e=>setFiltroCiudad(e.target.value)}><option value="TODAS">Todas las ciudades</option>{ciudadesDisponibles.map(x=><option key={x} value={x}>{x}</option>)}{haySinCiudad&&<option value="SIN">Sin ciudad</option>}</select>}
+            {user.rol!=="productor"&&<select style={{...iS,width:130}} value={filtroCancAnio} onChange={e=>setFiltroCancAnio(e.target.value)}><option value="TODOS">Fecha cancelado</option>{aniosCancelacion.map(a=><option key={a} value={a}>{a}</option>)}</select>}
           </div>
 
           <div style={{background:"#fff",border:"1px solid #E4DFCF",borderRadius:10,overflow:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
               <thead><tr style={{background:"#F0ECDD",textAlign:"left"}}>
-                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th>{user.rol!=="productor"&&<th style={TH}>Ciudad</th>}{user.rol!=="productor"&&<th style={TH}>Ubicación</th>}<th style={TH}>Situación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th><th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
+                <th style={TH}>Expediente</th><th style={TH}>Productor</th><th style={TH}>Destino</th><th style={TH}>Regional</th>{user.rol!=="productor"&&<th style={TH}>Ciudad</th>}<th style={TH}>Situación</th><th style={TH}>Monto</th><th style={TH}>Otorgado</th>{user.rol!=="productor"&&<th style={TH}>Cancelación</th>}<th style={TH}>Estado</th><th style={TH}>Rendición</th><th style={TH}></th>
               </tr></thead>
               <tbody>{filtrados.map(c=>{
                 const lc=lineas.find(l=>l.id===c.lineaId),dt=lc&&findDestino(lc,c.destinoId),reg=getRegional(c);
@@ -4290,19 +5533,12 @@ function CrecerApp(){
                   <td style={TD}>{dt?.nombre||c.detalleDestino}</td>
                   <td style={TD}>{reg==="Sin asignar"?<span style={{color:"#B0AA94"}}>Sin asignar</span>:reg}</td>
                   {user.rol!=="productor"&&<td style={TD}>{ciudadDe(c)||<span style={{color:"#B0AA94"}}>-</span>}</td>}
-                  {user.rol!=="productor"&&<td style={TD}>{(c.parcelas||[]).length===0?<span style={{color:"#B0AA94"}}>Sin ubicar</span>:
-                    <span title={c.parcelas.map(describirParcela).join("\n")} style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
-                      <MapPin size={11} color={c.parcelas[0].tipo==="punto"?"#8A8470":"var(--color-primary)"}/>
-                      {c.parcelas[0].tipo==="punto"?"Punto":c.parcelas[0].chacra?`Chacra ${c.parcelas[0].chacra}`:"Parcela"}
-                      {c.parcelas[0].renspa&&<span style={{fontFamily:"monospace",fontSize:10.5,color:"#5B6B63"}}>{c.parcelas[0].renspa}</span>}
-                      {c.parcelas.length>1&&<span style={{color:"#8A8470"}}>+{c.parcelas.length-1}</span>}
-                    </span>}
-                  </td>}
-                  <td style={TD}><SituacionBadge valor={c.situacion} corto/></td>
+                                    <td style={TD}><SituacionBadge valor={c.situacion} corto/></td>
                   <td style={{...TD,fontFamily:"monospace"}}>{money(c.monto)}</td>
                   <td style={TD}>{fmtDate(c.fechaOtorgamiento)}</td>
-                  <td style={TD}><EstadoBadge estado={calcularEstado(c)}/></td>
-                  <td style={TD}><RendicionBadge ok={!!c.rendicionPresentada}/></td>
+                  {user.rol!=="productor"&&<td style={TD}>{fechaCancelacion(c)}</td>}
+                  <td style={TD}><EstadoBadge estado={estadoFinal(c)}/></td>
+                  <td style={TD}><RendicionBadge estado={rendEstadoVisual(c)}/></td>
                   <td style={{...TD,color:"#9A9482"}}><ChevronRight size={15}/></td>
                 </tr>;
               })}
@@ -4313,7 +5549,7 @@ function CrecerApp(){
 
         </div>}
 
-        {view==="nuevo"&&isAdmin&&<NuevoCreditoForm lineas={lineas} onCreate={createCredito}/>}
+        {view==="nuevo"&&(isAdmin||user.rol==="viewer")&&<NuevoCreditoForm lineas={lineas} onCreate={createCredito}/>}
         {view==="lineas"&&isAdmin&&<LineasManager lineas={lineas} onSave={saveLineas}/>}
         {view==="usuarios"&&isAdmin&&<UsuariosManager usuarios={usuarios} onSave={saveUsuarios}/>}
         {view==="apariencia"&&isAdmin&&<AparienciaManager tema={tema} onSave={saveTema}/>}
@@ -4337,6 +5573,10 @@ function CrecerApp(){
     {showSimulador&&<SimuladorCuotas lineas={lineas} onClose={()=>setShowSimulador(false)} onPrint={imprimirHTML}/>}
     {showPadron&&isAdmin&&<VincularPadronModal creditos={creditos} onAplicar={agregarUbicaciones} onClose={()=>setShowPadron(false)}/>}
     {showPagos&&user.rol!=="productor"&&<PagosListado creditos={creditosVisibles} lineas={lineas} colorBarras={tema.primary} onClose={()=>setShowPagos(false)} onPrint={imprimirHTML} onSelectCredito={c=>{setShowPagos(false);setSelected(c);}}/>}
+    {user&&user.rol==="admin"&&config.copiaAuto&&config.copiaAuto.activa&&!claveAuto&&!omitirClaveAuto&&<ClaveCopiasModal onGuardar={(k)=>setClaveAuto(k)} onOmitir={()=>setOmitirClaveAuto(true)}/>}
+    {showActividad&&<ActividadModal log={log} onClose={()=>setShowActividad(false)}/>}
+    {showRespaldo&&<RespaldoModal datos={{usuarios,creditos,lineas,config,tema,log}} onRestaurar={aplicarRespaldo} onClose={()=>setShowRespaldo(false)} copiaAuto={config.copiaAuto} copias={copias} onToggleAuto={toggleAuto} onDescargar={descargarCopia}/>}
+    {showAutoridades&&<AutoridadesModal config={config} puedeEditar={isAdmin} onGuardar={n=>saveCfg(n)} onClose={()=>setShowAutoridades(false)}/>}
     {showEstadoCuenta&&<EstadoCuentaListado creditos={creditosVisibles} lineas={lineas} onClose={()=>setShowEstadoCuenta(false)} onPrint={imprimirHTML} onSelectCredito={c=>{setShowEstadoCuenta(false);setSelected(c);}}/>}
 
     {/* Chat DM flotante — siempre visible */}
